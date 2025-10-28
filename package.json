@@ -1,0 +1,29 @@
+{
+  "name": "playwright-login-tests",
+  "version": "1.0.0",
+  "description": "Automated login tests using Playwright and TypeScript",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:debug": "npx playwright test --debug", 
+    "report": "npx playwright show-report",
+    "server": "npx ts-node test-server.ts",
+    "test:with-server": "npm run server & sleep 3 && npm test; kill %1"
+  },
+  "keywords": [
+    "playwright",
+    "typescript",
+    "testing",
+    "automation",
+    "login"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.8.0",
+    "typescript": "^5.2.0",
+    "ts-node": "^10.9.0"
+  }
+}

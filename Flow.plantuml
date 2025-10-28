@@ -1,0 +1,40 @@
+@startuml
+title 🎯 Test Strategy: Heuristic vs Fuzzing (Oracle-Guided)
+
+skinparam style strictuml
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+
+box "Heuristic Test" #LightBlue
+  actor TesterH as "👤 Tester"
+  participant HI as "📚 HeuristicInputs"
+  participant OracleH as "🧠 Oracle"
+  participant SystemH as "🌐 Form System"
+end box
+
+box "Fuzzing Test" #LightGray
+  actor TesterF as "👤 Tester"
+  participant BaseF as "🧪 BaseInputs"
+  participant MutatorF as "🔀 Mutator"
+  participant OracleF as "🧠 Oracle"
+  participant SystemF as "🌐 Form System"
+  participant ReportF as "📊 Report Engine"
+end box
+
+' --- Heuristic Test ---
+TesterH -> HI : Definisce input (valid, invalid, edge)
+HI -> OracleH : Calcola predizione
+OracleH -> SystemH : Esegue test form
+SystemH --> OracleH : Risultato (esito, validazione)
+OracleH -> TesterH : Confronto predizione ↔ risultato
+
+' --- Fuzzing Test ---
+TesterF -> BaseF : Sceglie input base (es. "bob")
+BaseF -> MutatorF : Applica mutazioni semantiche
+MutatorF -> OracleF : Predice esito atteso
+MutatorF -> SystemF : Esegue input mutato sul form
+SystemF --> OracleF : Risultato osservato
+OracleF -> ReportF : Valuta accuratezza oracolo
+SystemF -> ReportF : Log di performance, anomalie
+ReportF --> TesterF : Genera dashboard/coverage
+@enduml

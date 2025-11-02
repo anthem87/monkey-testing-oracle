@@ -1,40 +1,95 @@
 @startuml
-title 🎯 Test Strategy: Heuristic vs Fuzzing (Oracle-Guided)
+title 🧬 Oracle-Guided Evolutionary Testing Framework (Heuristic ↔ Fuzzing ↔ Evolution)
 
 skinparam style strictuml
-skinparam ParticipantPadding 20
-skinparam BoxPadding 10
+skinparam ParticipantPadding 25
+skinparam BoxPadding 12
+skinparam shadowing false
+skinparam ArrowThickness 1
+skinparam ArrowColor #555
+skinparam noteBackgroundColor #FEFEFE
+skinparam noteBorderColor #888
 
-box "Heuristic Test" #LightBlue
-  actor TesterH as "👤 Tester"
+' ===================================================================
+box "Heuristic Testing" #LightBlue
+  actor TesterH as "👤 Tester (Heuristic)"
   participant HI as "📚 HeuristicInputs"
   participant OracleH as "🧠 Oracle"
-  participant SystemH as "🌐 Form System"
+  participant SystemH as "🌐 Target System"
 end box
 
-box "Fuzzing Test" #LightGray
-  actor TesterF as "👤 Tester"
+box "Fuzzing Testing" #LightGray
+  actor TesterF as "👤 Tester (Fuzzing)"
   participant BaseF as "🧪 BaseInputs"
   participant MutatorF as "🔀 Mutator"
   participant OracleF as "🧠 Oracle"
-  participant SystemF as "🌐 Form System"
+  participant SystemF as "🌐 Target System"
   participant ReportF as "📊 Report Engine"
 end box
 
-' --- Heuristic Test ---
+box "Evolutionary Engine" #LightYellow
+  participant Pop as "👥 Population 𝒫ₜ"
+  participant Fitness as "📈 Fitness Evaluator"
+  participant Evol as "♻️ Operators ℱ = {Selection,Crossover,Mutation}"
+  participant Stop as "🛑 Stop Conditions 𝒮"
+  participant Persist as "💾 Persistence Manager"
+end box
+
+box "Mathematical Model" #White
+  participant Model as "∑ Formal Model 𝒮 = ⟨𝒫,𝒪,ℰ,ℳ⟩"
+  participant OracleM as "Θₜ Oracle Parameters"
+end box
+
+' ===================================================================
+' Heuristic flow
 TesterH -> HI : Definisce input (valid, invalid, edge)
-HI -> OracleH : Calcola predizione
-OracleH -> SystemH : Esegue test form
-SystemH --> OracleH : Risultato (esito, validazione)
+HI -> OracleH : Calcola predizione attesa
+OracleH -> SystemH : Esegue test
+SystemH --> OracleH : Restituisce esito reale
 OracleH -> TesterH : Confronto predizione ↔ risultato
 
-' --- Fuzzing Test ---
-TesterF -> BaseF : Sceglie input base (es. "bob")
+' ===================================================================
+' Fuzzing flow
+TesterF -> BaseF : Seleziona input base (es. "bob")
 BaseF -> MutatorF : Applica mutazioni semantiche
 MutatorF -> OracleF : Predice esito atteso
-MutatorF -> SystemF : Esegue input mutato sul form
+MutatorF -> SystemF : Esegue input mutato
 SystemF --> OracleF : Risultato osservato
-OracleF -> ReportF : Valuta accuratezza oracolo
-SystemF -> ReportF : Log di performance, anomalie
-ReportF --> TesterF : Genera dashboard/coverage
+OracleF -> ReportF : Calcola accuratezza oracolo
+SystemF -> ReportF : Registra performance / errori
+ReportF --> TesterF : Dashboard e coverage
+
+' ===================================================================
+' Evolutionary loop
+ReportF -> Pop : Aggiorna popolazione iniziale 𝒫₀
+Pop -> Fitness : Valuta F(I) = Σ wᵢ·fᵢ(I)
+Fitness -> Evol : Seleziona e genera nuova popolazione ℱ(𝒫ₜ)
+Evol -> OracleM : Aggiorna parametri Θₜ₊₁ ← 𝒢(Θₜ,𝒫ₜ,ℛₜ)
+OracleM -> Model : Aggiorna modello formale 𝒮ₜ
+Evol -> Stop : Controlla criteri (φ*, H(𝒫ₜ), Δt)
+Stop -> Persist : Se necessario, salva checkpoint
+Persist -> Pop : Ripristina stato se ripresa evoluzione
+Evol -> ReportF : Salva risultati / pattern scoperti
+Stop --> TesterF : Notifica convergenza o arresto
+
+' ===================================================================
+' 🆕 Error Feedback Sub-loop (compilation/runtime fixes)
+SystemF --> Runner : 🔧 Error logs (compilation/runtime)
+Runner -> Feedback : Analizza e classifica errori
+Feedback -> CopilotO : Prompt di correzione "fix syntax / logic"
+CopilotO -> Evol : Aggiorna strategie mutazione (safe vs risky)
+Evol -> Pop : Applica patch ai test e rigenera individui
+note right of Feedback
+  Sub-loop di autocorrezione:
+  - rileva errori di compilazione
+  - corregge codice via Copilot
+  - aggiorna strategie evolutive
+end note
+
+note right of Model
+  ℱ : operatore evolutivo
+  𝒢 : aggiornamento oracolo
+  H(𝒫ₜ): entropia della popolazione
+  φ*(t): fitness ottimale
+end note
 @enduml

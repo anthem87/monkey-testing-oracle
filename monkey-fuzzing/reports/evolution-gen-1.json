@@ -1,20 +1,20 @@
 {
   "generation": 1,
-  "timestamp": "2025-11-03T00:09:10.603Z",
+  "timestamp": "2025-11-03T00:28:17.473Z",
   "summary": {
     "totalTests": 1,
     "passed": 0,
     "failed": 1,
     "oracleAccuracy": 0,
-    "entropy": 0.8812908992306927,
-    "variance": 0.007317333333333334,
+    "entropy": 0.8366407419411672,
+    "variance": 0.0068140246913580265,
     "avgExecutionTime": 0,
     "slowestTest": "none",
     "discoveredPatterns": 1,
     "performanceIndex": 1,
     "complexity": 180.62588931160624,
-    "qualityIndex": 0.6265108477742197,
-    "maturityIndex": 0.5475602395115043,
+    "qualityIndex": 0.6117928856496038,
+    "maturityIndex": 0.5825615831369195,
     "convergenceThreshold": 0.1,
     "semanticCoverage": 0,
     "structuralCoverage": 1,
@@ -22,15 +22,15 @@
   },
   "topIndividuals": [
     {
-      "id": "ind_0_1762128530825",
+      "id": "ind_0_1762129671526",
       "fitness": 0.1866666666666667
     },
     {
-      "id": "ind_1_1762128530825",
+      "id": "ind_1_1762129671526",
       "fitness": 0.1866666666666667
     },
     {
-      "id": "ind_2_1762128530825",
+      "id": "ind_2_1762129671526",
       "fitness": 0.1866666666666667
     }
   ],
@@ -42,10 +42,10 @@
     "🐢 Performance scarsa — ottimizzare test lenti o eliminare ridondanze."
   ],
   "trend": {
-    "avgFitness": 0.05600000000000002,
-    "avgAccuracy": 0.05600000000000002,
-    "entropyTrend": 0.8812908992306927,
-    "maturityTrend": 0.5156758353662769,
+    "avgFitness": 0.049777777777777796,
+    "avgAccuracy": 0.049777777777777796,
+    "entropyTrend": 0.8366407419411672,
+    "maturityTrend": 0.5144615798004651,
     "convergenceScore": 0.1,
     "emergenceProbability": 0.8174258141649446
   }

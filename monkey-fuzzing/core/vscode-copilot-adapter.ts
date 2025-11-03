@@ -16,6 +16,60 @@ export class VSCodeCopilotAdapter implements CopilotAPI {
     this.vscode = vscodeModule;
   }
 
+  /**
+   * Generate structured test output from Copilot
+   * @param prompt - Original prompt
+   * @param options - Generation options (language, testType, etc.)
+   * @returns JSON with {className, package, imports, fields, methods, testCode}
+   */
+  async generateStructured(prompt: string, options?: {
+    language?: string;
+    testType?: 'unit' | 'integration' | 'security';
+    targetClass?: string;
+  }): Promise<any> {
+    const structuredPrompt = `
+${prompt}
+
+IMPORTANT: Respond ONLY with valid JSON in this exact format:
+{
+  "className": "GeneratedTestClass",
+  "package": "com.example.test",
+  "imports": ["import org.junit.jupiter.api.Test;", "import static org.mockito.Mockito.*;"],
+  "fields": ["@Mock\\nprivate HttpServletRequest request;", "@Mock\\nprivate HttpServletResponse response;"],
+  "methods": [
+    {
+      "name": "testMethodName",
+      "annotations": ["@Test"],
+      "signature": "void testMethodName() throws Exception",
+      "body": "// test body here\\nassertEquals(expected, actual);"
+    }
+  ]
+}
+
+Do NOT include markdown code blocks, explanations, or any text outside the JSON structure.
+Language: ${options?.language || 'java'}
+`;
+
+    const jsonResponse = await this.generate(structuredPrompt);
+    
+    try {
+      // Extract JSON from markdown code blocks if present
+      const jsonMatch = jsonResponse.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || 
+                        jsonResponse.match(/(\{[\s\S]*\})/);
+      
+      if (!jsonMatch) {
+        console.warn('⚠️ Copilot did not return JSON. Raw response:', jsonResponse.slice(0, 200));
+        throw new Error('Copilot response is not valid JSON');
+      }
+
+      return JSON.parse(jsonMatch[1]);
+    } catch (parseError) {
+      console.error('❌ Failed to parse Copilot JSON:', parseError);
+      console.log('Raw response:', jsonResponse.slice(0, 500));
+      throw new Error(`Copilot returned invalid JSON: ${parseError}`);
+    }
+  }
+
   async generate(prompt: string): Promise<string> {
     if (!this.vscode?.lm) {
       throw new Error('VS Code Language Model API not available. Are you running inside VS Code Extension?');

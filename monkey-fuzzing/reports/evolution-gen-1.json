@@ -1,0 +1,51 @@
+{
+  "generation": 1,
+  "timestamp": "2025-11-02T18:15:47.383Z",
+  "summary": {
+    "totalTests": 1,
+    "passed": 0,
+    "failed": 1,
+    "oracleAccuracy": 0,
+    "entropy": 0,
+    "variance": 0,
+    "avgExecutionTime": 897.8401480019093,
+    "slowestTest": "testDoThingNormal",
+    "discoveredPatterns": 1,
+    "performanceIndex": 0.5269147673226449,
+    "complexity": 180.62588931160624,
+    "qualityIndex": 0.33516860766892903,
+    "maturityIndex": 0.5,
+    "convergenceThreshold": 0.001,
+    "semanticCoverage": 0,
+    "structuralCoverage": 1,
+    "totalCoverage": 0.5
+  },
+  "topIndividuals": [
+    {
+      "id": "ind_0_1762107322356",
+      "fitness": 0
+    },
+    {
+      "id": "ind_0_1762107322356",
+      "fitness": 0
+    },
+    {
+      "id": "ind_0_1762107322356",
+      "fitness": 0
+    }
+  ],
+  "recommendations": [
+    "🔴 Accuracy bassa — ricalibrare l'oracolo o aumentare il training data.",
+    "🧊 Entropia bassa — aggiungere più diversità nelle mutazioni.",
+    "🧠 Sistema non maturo — proseguire l'evoluzione per maggiore stabilità.",
+    "🐢 Performance scarsa — ottimizzare test lenti o eliminare ridondanze."
+  ],
+  "trend": {
+    "avgFitness": 0,
+    "avgAccuracy": 0,
+    "entropyTrend": 0,
+    "maturityTrend": 0.5,
+    "convergenceScore": 0.001,
+    "emergenceProbability": 0.8174258141649446
+  }
+}

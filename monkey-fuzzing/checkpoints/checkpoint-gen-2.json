@@ -1,0 +1,527 @@
+{
+  "generation": 2,
+  "timestamp": "2025-11-02T18:16:02.163Z",
+  "population": [
+    {
+      "id": "ind_0_1762107322356",
+      "fitness": 0,
+      "age": 3,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "ind_0_1762107322356",
+      "fitness": 0,
+      "age": 3,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "ind_0_1762107322356",
+      "fitness": 0,
+      "age": 3,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_59jao6",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107346482_e8w6b5",
+      "fitness": 0,
+      "age": 1,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107346482_74zfqb",
+      "fitness": 0,
+      "age": 1,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_t1xx8t",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "ind_2_1762107322356",
+      "fitness": 0,
+      "age": 3,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_frz2za",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_qzn2gw",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": 9007199254740991,
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_s8h9y4",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_9yt0dk",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": 9007199254740991,
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_51smbw",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_kwcmux",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal_sec",
+          "input": "normal string<script>alert('XSS')</script>",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361294_a54iui",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "gnirts lamron",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107346482_74zfqb",
+      "fitness": 0,
+      "age": 1,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107346482_npsz4r",
+      "fitness": 0,
+      "age": 1,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_speoh6",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_xl1bda",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_n2c90t",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_ztsyaw",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_xretei",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_nmuxqw",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_uihuz4",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_1z7vzd",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_zp9ipt",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal%20string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107346482_e8w6b5",
+      "fitness": 0,
+      "age": 1,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107346482_74zfqb",
+      "fitness": 0,
+      "age": 1,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "child_1762107361295_ygtm35",
+      "fitness": 0,
+      "age": 0,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "normal string",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    },
+    {
+      "id": "ind_0_1762107322356",
+      "fitness": 0,
+      "age": 3,
+      "testCount": 1,
+      "tests": [
+        {
+          "name": "testDoThingNormal",
+          "input": "bm9ybWFsIHN0cmluZw==",
+          "expected": "returns positive int",
+          "confidence": 1,
+          "language": "java",
+          "code": "/* JUnit test stub */"
+        }
+      ]
+    }
+  ],
+  "oracle": {
+    "accuracy": 0,
+    "confidenceEntropy": 0,
+    "parameters": {
+      "confidenceThreshold": 0.5,
+      "maxInputLength": 2000,
+      "securityPatterns": [],
+      "validationRules": []
+    },
+    "maturity": 0
+  },
+  "stateSnapshot": {
+    "generation": 2,
+    "timestamp": "2025-11-02T18:16:01.295Z",
+    "populationSize": 30,
+    "individualDimensionAvg": 3,
+    "dimPopulation": 90,
+    "dimOracle": 2,
+    "dimOperators": 5,
+    "dimMetaModel": 7,
+    "dimTotal": 104,
+    "growthRateApprox": 0,
+    "entropyPopulation": 0,
+    "varianceFitness": 0,
+    "lipschitzF": 0,
+    "lipschitzG": 0,
+    "coverageSemantic": 0,
+    "coverageStructural": 0,
+    "coverageTotal": 0,
+    "oracleThreshold": 0.5,
+    "operators": {
+      "selection": "tournament(4)",
+      "crossover": "uniform",
+      "mutation": "weighted-adaptive",
+      "elitism": "top-5",
+      "oracleUpdate": "gradient+entropy-adjust"
+    }
+  },
+  "entropyFitness": 0,
+  "varianceFitness": 0,
+  "convergenceThreshold": 0.001
+}

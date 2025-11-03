@@ -12,8 +12,6 @@
  * Sections I–IX only (no qualia or cognitive metrics).
  */
 
-import { mean, variance } from './utils/math'; // opzionale, oppure definisci inline
-import { Counter } from './utils/counter';     // semplice helper
 
 // ===============================================================
 // I. UTILITY FUNCTIONS - PURE DETERMINISTIC
@@ -104,7 +102,7 @@ function hashCode(str: string): number {
 // III. ADAPTIVE THRESHOLDS
 // ===============================================================
 
-export function adaptiveConvergenceThreshold(targets: number[] | number, epsilon?: number): number {
+export function adaptiveConvergenceThreshold(targets: number[] | number, _epsilon?: number): number {
     if (typeof targets === 'number') {
         const n = targets;
         if (n <= 0) return 0.001;
@@ -296,6 +294,28 @@ export function systemDiagnostics(recentLosses: number[], datasetSize: number): 
     const maturityIndex = systemMaturity(recentLosses);
     const params = optimalFuzzyParams(datasetSize, variance);
     return { entropy, variance, convergenceRate, maturityIndex, recommendedParams: params };
+}
+
+// ===============================================================
+// X. ADDITIONAL HELPERS (Lipschitz & Coverage Combination)
+// ===============================================================
+
+export function lipschitzEstimate(prev: number[], next: number[]): number {
+    if (prev.length === 0 || next.length === 0) return 0;
+    const n = Math.min(prev.length, next.length);
+    let maxRatio = 0;
+    for (let i = 0; i < n; i++) {
+        const dx = Math.abs(next[i] - prev[i]);
+        const denom = Math.abs(prev[i]) + 1e-6;
+        const ratio = dx / denom;
+        if (ratio > maxRatio) maxRatio = ratio;
+    }
+    return Number(maxRatio.toFixed(6));
+}
+
+export function coverageCombine(semantic: number, structural: number, beta = 0.5): number {
+    const b = Math.min(1, Math.max(0, beta));
+    return b * semantic + (1 - b) * structural;
 }
 
 // ===============================================================

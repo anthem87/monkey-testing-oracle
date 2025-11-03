@@ -1,0 +1,48 @@
+{
+  "name": "monkey-fuzzing-vscode",
+  "displayName": "Monkey Fuzzing - AI Test Generator",
+  "description": "Evolutionary testing framework with GitHub Copilot integration",
+  "version": "0.1.0",
+  "publisher": "monkey-fuzzing",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:java",
+    "onLanguage:python",
+    "onLanguage:typescript"
+  ],
+  "main": "./out/extension/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "monkey-fuzzing.analyzeCurrentFile",
+        "title": "Monkey Fuzzing: Analyze & Generate Tests"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "monkey-fuzzing.analyzeCurrentFile",
+          "group": "navigation",
+          "when": "resourceLangId == java || resourceLangId == python || resourceLangId == typescript"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.24",
+    "@types/vscode": "^1.105.0",
+    "typescript": "^5.9.3"
+  }
+}

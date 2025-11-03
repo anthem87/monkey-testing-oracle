@@ -16,7 +16,11 @@
     "test:e2e:debug": "playwright test --debug",
     "playwright:install": "playwright install --with-deps",
     "lint": "eslint src --ext ts,tsx",
-    "preview": "vite preview"
+  "preview": "vite preview",
+  "evolution:demo": "tsx core/main.ts --config ./config/evolution.json",
+    "analyze": "tsx core/main.ts --target-file",
+    "test:smoke": "ts-node core/test-smoke.ts",
+  "coverage:demo": "c8 --reporter=text --reporter=lcov ts-node core/main.ts --config ./config/evolution.json"
   },
   "keywords": [
     "typescript",
@@ -54,6 +58,7 @@
     "eslint-plugin-react-refresh": "^0.4.5",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
-    "vite": "^5.0.8"
+    "vite": "^5.0.8",
+    "c8": "^9.0.0"
   }
 }

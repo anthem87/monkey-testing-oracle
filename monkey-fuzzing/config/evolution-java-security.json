@@ -1,0 +1,22 @@
+{
+  "populationSize": 20,
+  "mutationRate": 0.05,
+  "crossoverRate": 0.4,
+  "generations": 15,
+  "elitismCount": 5,
+  "fitnessWeights": {
+    "oracleAccuracy": 0.35,
+    "testCoverage": 0.25,
+    "performance": 0.10,
+    "securityFindings": 0.20,
+    "diversity": 0.10
+  },
+  "comments": {
+    "purpose": "Configurazione conservativa per codice Java security-critical",
+    "populationSize": "20 TestSuite = popolazione gestibile e diversificata",
+    "mutationRate": "5% = mutazioni conservative per non rompere test validi",
+    "generations": "15 = più iterazioni piccole invece di poche grosse",
+    "elitismCount": "5 = mantieni top 25% per preservare buoni test",
+    "securityFindings": "20% peso = enfasi su scoperta vulnerabilità"
+  }
+}

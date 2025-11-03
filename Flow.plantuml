@@ -1,5 +1,6 @@
 @startuml
-title 🧬 Oracle-Guided Evolutionary Testing Framework (Heuristic ↔ Fuzzing ↔ Evolution)
+title 🧬 Oracle-Guided Evolutionary Testing Framework
+subtitle Heuristic ↔ Fuzzing ↔ Evolution ↔ Self-Repair ↔ Coverage
 
 skinparam style strictuml
 skinparam ParticipantPadding 25
@@ -33,11 +34,19 @@ box "Evolutionary Engine" #LightYellow
   participant Evol as "♻️ Operators ℱ = {Selection,Crossover,Mutation}"
   participant Stop as "🛑 Stop Conditions 𝒮"
   participant Persist as "💾 Persistence Manager"
+  participant Resume as "↩️ Resume Loader (--resume)"
 end box
 
 box "Mathematical Model" #White
   participant Model as "∑ Formal Model 𝒮 = ⟨𝒫,𝒪,ℰ,ℳ⟩"
   participant OracleM as "Θₜ Oracle Parameters"
+  participant StateT as "🛰 StateTracker dim(Sₜ), H(𝒫ₜ), L_F, L_G"
+end box
+
+box "Coverage & Repair" #MintCream
+  participant CovEng as "🧪 RealCoverageEngine"
+  participant MutPipe as "🩹 MutationPipeline"
+  participant CopilotFix as "🤖 CopilotFixEngine"
 end box
 
 ' ===================================================================
@@ -76,14 +85,31 @@ Stop --> TesterF : Notifica convergenza o arresto
 ' 🆕 Error Feedback Sub-loop (compilation/runtime fixes)
 SystemF --> Runner : 🔧 Error logs (compilation/runtime)
 Runner -> Feedback : Analizza e classifica errori
-Feedback -> CopilotO : Prompt di correzione "fix syntax / logic"
-CopilotO -> Evol : Aggiorna strategie mutazione (safe vs risky)
-Evol -> Pop : Applica patch ai test e rigenera individui
+Feedback -> CopilotFix : Genera candidate fixes (syntax/logic/input)
+CopilotFix -> MutPipe : Seleziona best patch & applica
+MutPipe -> Evol : Propaga test riparati (applyRepairs)
+Evol -> Pop : Aggiorna individui con versioni riparate
 note right of Feedback
   Sub-loop di autocorrezione:
-  - rileva errori di compilazione
-  - corregge codice via Copilot
-  - aggiorna strategie evolutive
+  - rileva errori (compile/runtime/security)
+  - genera più patch candidate
+  - selezione best fix (confidence, minimal diff)
+  - propagazione riparazioni nella popolazione
+end note
+
+CovEng -> ReportF : Inietta metriche coverage reali (semantic/structural)
+ReportF -> StateT : Aggiorna Mₜ (coverageTotal)
+StateT -> Model : Snapshot dim(Sₜ), Lipschitz L_F,L_G
+Persist -> Resume : Checkpoint disponibili
+Resume -> Pop : Ricostruisce popolazione & suite base
+
+note right of StateT
+  Snapshot fields:
+  - dimTotal = dim(𝒫ₜ)+dim(Θₜ)+…
+  - H(𝒫ₜ) entropia fitness
+  - L_F Lipschitz operatore evolutivo
+  - L_G Lipschitz aggiornamento oracolo
+  - coverageSemantic / structural / total
 end note
 
 note right of Model

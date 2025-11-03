@@ -189,7 +189,11 @@ export class TestRunner {
         if (suite.targetLanguage === 'java' && suite.tests.length > 0) {
             const { TestWriter } = await import('./test-writer.js');
             const writer = new TestWriter();
+<<<<<<< HEAD
             await writer.writeTests(baseTestDir, suite.tests, suite.targetLanguage);
+=======
+            await writer.writeTests(suite.tests, baseTestDir, suite.targetLanguage);
+>>>>>>> be92b25 (work in progress)
             console.log(`✅ Merged ${suite.tests.length} Java tests into single class file`);
         } else {
             // For other languages: write individual test files

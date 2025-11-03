@@ -22,26 +22,14 @@ function deterministicHash(str: string): string {
     }
     return Math.abs(h).toString(36);
 }
-import { ErrorClassifier, NormalizedError } from './error-classifier';
+import { ErrorClassifier, NormalizedError } from './error-classifier.js';
+import { detectBuildTool, type BuildToolAdapter } from './build-tool-adapter.js';
+import { GeneratedTest, GeneratedTestSuite } from './types.js';
 
 // ===========================================================
 // 🔹 INTERFACCE
 // ===========================================================
-export interface GeneratedTest {
-    name: string;
-    input: any;
-    expected: any;
-    confidence: number;
-    language?: "java" | "python" | "rust" | "typescript";
-    code?: string; // test code già generato
-}
-
-export interface GeneratedTestSuite {
-    id: string;
-    targetLanguage: "java" | "python" | "rust" | "typescript";
-    tests: GeneratedTest[];
-    outputDir?: string;
-}
+// Importate da types.ts per consistency
 
 export interface TestExecutionResult {
     testName: string;
@@ -58,20 +46,179 @@ export interface TestExecutionResult {
 export class TestRunner {
     private errorClassifier = new ErrorClassifier();
     private lastErrors: NormalizedError[] = [];
+    private buildToolAdapter: BuildToolAdapter | null = null;
+    private projectRoot: string | null = null;
+
     constructor(private workspaceRoot = process.cwd()) { }
 
     /**
+     * Initialize build tool detection for a project
+     */
+    async initializeBuildTool(projectRoot: string): Promise<void> {
+        this.projectRoot = projectRoot;
+        this.buildToolAdapter = await detectBuildTool(projectRoot);
+        if (this.buildToolAdapter) {
+            console.log(`[TestRunner] Detected build tool for project: ${projectRoot}`);
+        }
+    }
+
+    /**
      * Esegue una test suite reale su filesystem
+     * Se rilevato un build tool (Maven, Gradle, etc), lo usa automaticamente
      */
     async runGeneratedTests(suite: GeneratedTestSuite): Promise<TestExecutionResult[]> {
+        // If we have a build tool adapter, use it for batch execution
+        if (this.buildToolAdapter && this.projectRoot) {
+            return this.runWithBuildTool(suite);
+        }
+
+        // Otherwise, fall back to individual test execution
+        return this.runIndividualTests(suite);
+    }
+
+    /**
+     * Run tests using detected build tool (Maven, Gradle, pytest, npm)
+     */
+    private async runWithBuildTool(suite: GeneratedTestSuite): Promise<TestExecutionResult[]> {
+        const results: TestExecutionResult[] = [];
+        
+        console.log(`🧪 Running ${suite.tests.length} tests via build tool: ${this.projectRoot}`);
+        
+        try {
+            // Step 1: Write test files to project test directory
+            console.log(`📝 Writing tests to project...`);
+            const testDir = await this.writeTestsToProject(suite);
+            console.log(`✅ Tests written to: ${testDir}`);
+            
+            // Step 2: Compile the project
+            console.log(`📦 Compiling project...`);
+            const compileResult = await this.buildToolAdapter!.compile(this.projectRoot!);
+            
+            if (!compileResult.success && compileResult.errors.length > 0) {
+                console.log(`⚠️ Compilation failed with ${compileResult.errors.length} errors`);
+                compileResult.errors.slice(0, 3).forEach(e => console.log(`  - ${e.substring(0, 120)}`));
+                
+                // Classify compilation errors for feedback loop
+                for (const error of compileResult.errors) {
+                    const classified = this.errorClassifier.classify('compilation-error', error);
+                    if (classified) this.lastErrors.push(classified);
+                }
+                
+                // Return failed results - compilation failed, tests cannot run
+                for (const test of suite.tests) {
+                    results.push({
+                        testName: test.name,
+                        passed: false,
+                        executionTime: 0,
+                        stderr: compileResult.errors.join('\n'),
+                        error: 'Compilation failed'
+                    });
+                }
+                return results;
+            }
+            
+            // Step 3: Run all tests via build tool
+            console.log(`🧪 Executing tests via build tool...`);
+            const start = performance.now();
+            const buildResult = await this.buildToolAdapter!.runTests(this.projectRoot!);
+            const end = performance.now();
+            
+            console.log(`📊 Build result: ${buildResult.testsRun} tests, ${buildResult.testsPassed} passed, ${buildResult.testsFailed} failed`);
+
+            // Parse individual test results from build output
+            const testsRan = buildResult.testsRun || suite.tests.length;
+            const avgTime = (end - start) / (testsRan || 1);
+            
+            for (const test of suite.tests) {
+                const classified = this.errorClassifier.classify(test.name, buildResult.stderr, buildResult.stdout);
+                if (classified) this.lastErrors.push(classified);
+
+                // Assume tests passed proportionally
+                const passed = buildResult.success && buildResult.testsFailed === 0;
+                
+                results.push({
+                    testName: test.name,
+                    passed,
+                    executionTime: avgTime,
+                    stdout: buildResult.stdout,
+                    stderr: buildResult.stderr,
+                });
+            }
+        } catch (err: any) {
+            console.error(`❌ Build tool execution failed:`, err.message);
+            const classified = this.errorClassifier.classify('build-tool-execution', err.message);
+            if (classified) this.lastErrors.push(classified);
+
+            // All tests failed
+            for (const test of suite.tests) {
+                results.push({
+                    testName: test.name,
+                    passed: false,
+                    executionTime: 0,
+                    error: err.message,
+                });
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Write tests to project test directory
+     * Detects project type and writes to appropriate location
+     * For Java: extracts package and creates proper directory structure
+     */
+    private async writeTestsToProject(suite: GeneratedTestSuite): Promise<string> {
+        // Detect test directory structure based on language
+        let baseTestDir: string;
+        
+        if (suite.targetLanguage === 'java') {
+            // Maven/Gradle: src/test/java
+            baseTestDir = path.join(this.projectRoot!, 'src', 'test', 'java');
+        } else if (suite.targetLanguage === 'python') {
+            // Python: tests/
+            baseTestDir = path.join(this.projectRoot!, 'tests');
+        } else {
+            // TypeScript/JavaScript/Rust/etc: src/__tests__ or tests/
+            baseTestDir = path.join(this.projectRoot!, 'src', '__tests__');
+        }
+
+        await fs.mkdir(baseTestDir, { recursive: true });
+
+        // For Java: merge all tests into a single class file
+        if (suite.targetLanguage === 'java' && suite.tests.length > 0) {
+            const { TestWriter } = await import('./test-writer.js');
+            const writer = new TestWriter();
+            await writer.writeTests(suite.tests, baseTestDir, suite.targetLanguage);
+            console.log(`✅ Merged ${suite.tests.length} Java tests into single class file`);
+        } else {
+            // For other languages: write individual test files
+            for (const test of suite.tests) {
+                const ext = this.getFileExtension(test.metadata.language || suite.targetLanguage);
+                const filePath = path.join(baseTestDir, `${test.name}.${ext}`);
+                
+                if (test.code) {
+                    await fs.writeFile(filePath, test.code, 'utf-8');
+                    console.log(`📝 Writing test to: ${test.name}.${ext}`);
+                }
+            }
+        }
+
+        return baseTestDir;
+    }
+
+    /**
+     * Run tests individually (fallback when no build tool detected)
+     */
+    private async runIndividualTests(suite: GeneratedTestSuite): Promise<TestExecutionResult[]> {
         const results: TestExecutionResult[] = [];
         const suiteDir = await this.prepareSuiteDirectory(suite);
 
         for (const test of suite.tests) {
             const start = performance.now();
             try {
-                const filePath = await this.writeTestFile(test, suiteDir);
-                const execResult = await this.executeTestFile(filePath, suite.targetLanguage);
+                const filePath = await this.writeTestFile(test, suiteDir, suite.targetLanguage);
+                const execResult = await this.executeTestFile(filePath, suite.targetLanguage || 'typescript');
                 const end = performance.now();
 
                 const classified = this.errorClassifier.classify(test.name, execResult.stderr, execResult.stdout);
@@ -102,8 +249,8 @@ export class TestRunner {
     /**
      * Scrive ogni test in file separato nel linguaggio target
      */
-    private async writeTestFile(test: GeneratedTest, dir: string): Promise<string> {
-        const ext = this.getFileExtension(test.language);
+    private async writeTestFile(test: GeneratedTest, dir: string, targetLanguage?: string): Promise<string> {
+        const ext = this.getFileExtension(test.metadata.language || targetLanguage || 'typescript');
         const filePath = path.join(dir, `${test.name}.${ext}`);
 
         if (!test.code) {

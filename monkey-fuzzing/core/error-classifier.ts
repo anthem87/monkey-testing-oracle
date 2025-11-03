@@ -52,8 +52,10 @@ export class ErrorClassifier {
     const raw = (stderr || '') + (stdout || '');
     let kind: ErrorKind = 'unknown';
 
-    if (/SyntaxError|TypeError|ReferenceError|Parsing error/i.test(raw)) kind = 'compile';
-    else if (/AssertionError|RangeError|UnhandledPromise/i.test(raw)) kind = 'runtime';
+    // Build tool errors (Maven, Gradle, etc.) - agnostic approach
+    if (/\[ERROR\]/i.test(raw)) kind = 'compile';
+    // Runtime errors
+    else if (/AssertionError|RangeError|UnhandledPromise|Exception|Error:/i.test(raw)) kind = 'runtime';
     else if (/ETIMEDOUT|Timeout|Exceeded/i.test(raw)) kind = 'timeout';
     else if (/XSS|injection|payload|security/i.test(raw)) kind = 'security';
 

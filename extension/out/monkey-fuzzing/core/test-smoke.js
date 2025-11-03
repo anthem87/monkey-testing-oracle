@@ -33,8 +33,14 @@ async function runSmoke() {
     evolutionEngine.setStateTracker(stateTracker);
     const suite = {
         tests: [
-            { name: 'ok_case', input: 'abc', confidence: 1 },
-            { name: 'compile_err', input: 'xyz', confidence: 0.8 }
+            {
+                name: 'ok_case', input: 'abc', expected: 'valid', code: 'console.log("ok");',
+                metadata: { targetFile: '', origin: 'copilot-initial', confidence: 1 }
+            },
+            {
+                name: 'compile_err', input: 'xyz', expected: 'valid', code: 'console.log("err");',
+                metadata: { targetFile: '', origin: 'copilot-initial', confidence: 0.8 }
+            }
         ]
     };
     evolutionEngine.initialize({ tests: suite.tests });

@@ -25,7 +25,7 @@ const copilot_fix_1 = require("./copilot-fix");
 const mutation_pipeline_1 = require("./mutation-pipeline");
 const error_classifier_1 = require("./error-classifier");
 const persistence_1 = require("./persistence");
-const runner_1 = require("./runner");
+const runner_js_1 = require("./runner.js");
 const coverage_engine_1 = require("./coverage-engine");
 const copilot_analyzer_1 = require("./copilot-analyzer");
 const sandbox_manager_1 = require("./sandbox-manager");
@@ -67,7 +67,62 @@ async function bootstrap() {
     const reportEngine = new report_1.ReportEngine("./reports");
     const evolutionEngine = new evolution_1.EvolutionEngine(config);
     const feedbackEngine = new feedback_1.FeedbackEngine(oracleManager, mutationRegistry, config);
-    const testRunner = new runner_1.TestRunner(); // modulo esecutivo, da implementare o mockare
+    const testRunner = new runner_js_1.TestRunner(); // modulo esecutivo, da implementare o mockare
+    // Initialize build tool adapter if project root is provided or can be detected
+    let projectRootArg = process.argv.includes('--project')
+        ? process.argv[process.argv.indexOf('--project') + 1]
+        : process.argv.includes('--project-root')
+            ? process.argv[process.argv.indexOf('--project-root') + 1]
+            : null;
+    // If not provided, try to auto-detect from sandbox
+    let detectedLanguage = 'typescript';
+    // Auto-detect language from sandbox if provided
+    if (process.argv.includes('--sandbox')) {
+        const sandboxId = process.argv[process.argv.indexOf('--sandbox') + 1];
+        const workspaceRoot = path_1.default.resolve('..');
+        const sandboxPath = path_1.default.join(workspaceRoot, '.sandboxes', sandboxId);
+        const testsPath = path_1.default.join(sandboxPath, 'tests');
+        try {
+            const files = await promises_1.default.readdir(testsPath);
+            if (files.some(f => f.endsWith('.java'))) {
+                detectedLanguage = 'java';
+                console.log(`🔍 Detected language: Java`);
+            }
+            else if (files.some(f => f.endsWith('.py'))) {
+                detectedLanguage = 'python';
+                console.log(`🔍 Detected language: Python`);
+            }
+            else if (files.some(f => f.endsWith('.rs'))) {
+                detectedLanguage = 'rust';
+                console.log(`🔍 Detected language: Rust`);
+            }
+            else {
+                console.log(`🔍 Detected language: TypeScript (default)`);
+            }
+        }
+        catch (err) {
+            console.log(`⚠️ Could not detect language from sandbox, using default: TypeScript`);
+        }
+    }
+    if (!projectRootArg && process.argv.includes('--sandbox')) {
+        const sandboxId = process.argv[process.argv.indexOf('--sandbox') + 1];
+        // Sandbox is in workspace root, not in monkey-fuzzing folder
+        const workspaceRoot = path_1.default.resolve('..');
+        const sandboxPath = path_1.default.join(workspaceRoot, '.sandboxes', sandboxId);
+        console.log(`🔍 Auto-detecting project root from sandbox: ${sandboxPath}`);
+        const sandboxMgr = new sandbox_manager_1.SandboxManager();
+        projectRootArg = await sandboxMgr.detectProjectRoot(sandboxPath);
+        if (projectRootArg) {
+            console.log(`✅ Detected project root: ${projectRootArg}`);
+        }
+        else {
+            console.log(`⚠️ Could not auto-detect project root from sandbox`);
+        }
+    }
+    if (projectRootArg) {
+        console.log(`🔧 Initializing build tool for project: ${projectRootArg}`);
+        await testRunner.initializeBuildTool(projectRootArg);
+    }
     const errorClassifier = new error_classifier_1.ErrorClassifier(); // standalone for aggregation (runner has internal one)
     const copilotFix = new copilot_fix_1.CopilotFixEngine(); // adapter potrà essere iniettato
     const mutationPipeline = new mutation_pipeline_1.MutationPipeline(copilotFix);
@@ -109,22 +164,89 @@ async function bootstrap() {
                 name: t.name,
                 input: t.input,
                 expected: t.expected,
-                confidence: 1.0,
-                language: targetLanguage,
-                code: t.code
+                code: t.code,
+                metadata: {
+                    targetFile: analysis.sourceFile,
+                    language: targetLanguage,
+                    origin: 'copilot-initial',
+                    generation: 0,
+                    confidence: 1.0
+                }
             }))
         };
         console.log(`✅ Generated ${initialTests.length} initial test(s) from Copilot analysis.`);
+    }
+    else if (process.argv.includes('--sandbox')) {
+        // Load tests from existing sandbox
+        const sandboxId = process.argv[process.argv.indexOf('--sandbox') + 1];
+        const workspaceRoot = path_1.default.resolve('..');
+        const sandboxPath = path_1.default.join(workspaceRoot, '.sandboxes', sandboxId);
+        const testsPath = path_1.default.join(sandboxPath, 'tests');
+        console.log(`📂 Loading tests from sandbox: ${testsPath}`);
+        try {
+            const testFiles = await promises_1.default.readdir(testsPath);
+            const javaTests = testFiles.filter(f => f.endsWith('.java') && !f.startsWith('.'));
+            const tests = [];
+            for (const file of javaTests) {
+                const code = await promises_1.default.readFile(path_1.default.join(testsPath, file), 'utf-8');
+                const name = path_1.default.basename(file, '.java');
+                tests.push({
+                    name,
+                    code, // ✅ Include full code
+                    input: 'test',
+                    expected: 'valid',
+                    confidence: 1.0,
+                    language: detectedLanguage,
+                    metadata: {
+                        targetFile: projectRootArg || '',
+                        language: detectedLanguage,
+                        origin: 'copilot-initial',
+                        generation: 0
+                    }
+                });
+            }
+            baseSuite = {
+                id: `sandbox_${sandboxId}`,
+                targetLanguage: detectedLanguage,
+                tests
+            };
+            console.log(`✅ Loaded ${tests.length} test(s) from sandbox`);
+        }
+        catch (error) {
+            console.error(`❌ Failed to load tests from sandbox:`, error);
+            // Fall through to fallback
+            const defaultConfidence = 1.0 - (0, metrics_1.emergenceThreshold)(2);
+            baseSuite = {
+                id: 'base_suite',
+                targetLanguage: detectedLanguage,
+                tests: [
+                    {
+                        name: "simple_case", input: "test", expected: "valid", code: "console.log('simple_case');",
+                        metadata: { targetFile: '', language: detectedLanguage, origin: 'copilot-initial', generation: 0, confidence: 1.0 }
+                    },
+                    {
+                        name: "edge_case", input: "", expected: "invalid", code: "console.log('edge_case');",
+                        metadata: { targetFile: '', language: detectedLanguage, origin: 'copilot-initial', generation: 0, confidence: defaultConfidence }
+                    },
+                ],
+            };
+        }
     }
     else {
         // Fallback: hardcoded stub suite with formal confidence
         const defaultConfidence = 1.0 - (0, metrics_1.emergenceThreshold)(2); // ~0.9 for 2 tests
         baseSuite = {
             id: 'base_suite',
-            targetLanguage: 'typescript',
+            targetLanguage: detectedLanguage, // Use auto-detected language
             tests: [
-                { name: "simple_case", input: "test", expected: "valid", confidence: 1.0, language: "typescript", code: "console.log('simple_case');" },
-                { name: "edge_case", input: "", expected: "invalid", confidence: defaultConfidence, language: "typescript", code: "console.log('edge_case');" },
+                {
+                    name: "simple_case", input: "test", expected: "valid", code: "console.log('simple_case');",
+                    metadata: { targetFile: '', language: 'typescript', origin: 'copilot-initial', generation: 0, confidence: 1.0 }
+                },
+                {
+                    name: "edge_case", input: "", expected: "invalid", code: "console.log('edge_case');",
+                    metadata: { targetFile: '', language: 'typescript', origin: 'copilot-initial', generation: 0, confidence: defaultConfidence }
+                },
             ],
         };
     }
@@ -133,22 +255,32 @@ async function bootstrap() {
         const latest = await persistence.loadLatest();
         if (latest) {
             console.log(`↩️ Ripristino checkpoint generazione ${latest.generation}`);
-            // restore population into engine
-            evolutionEngine.resumeFromState(latest.population.map(p => ({ id: p.id, fitness: p.fitness, age: p.age, tests: p.tests })), { generations: config.generations });
+            // restore population into engine with proper metadata
+            const restoredPopulation = latest.population.map(p => ({
+                id: p.id,
+                fitness: p.fitness,
+                age: p.age,
+                tests: p.tests.map((t) => ({
+                    name: t.name,
+                    input: t.input || 'default',
+                    expected: t.expected || 'valid',
+                    code: t.code || "console.log('resume');",
+                    metadata: {
+                        targetFile: t.metadata?.targetFile || '',
+                        language: t.metadata?.language || 'typescript',
+                        origin: (t.metadata?.origin || 'mutated'),
+                        generation: t.metadata?.generation || latest.generation,
+                        confidence: t.metadata?.confidence || t.confidence || (0, metrics_1.emergenceThreshold)(p.tests.length)
+                    }
+                }))
+            }));
+            evolutionEngine.resumeFromState(restoredPopulation, { generations: config.generations });
             // rebuild baseSuite from first individual's tests if present
             if (latest.population.length > 0) {
-                const fallbackConf = (0, metrics_1.emergenceThreshold)(latest.population[0].tests.length);
                 baseSuite = {
                     id: 'resume_suite',
-                    targetLanguage: 'typescript',
-                    tests: latest.population[0].tests.map(t => ({
-                        name: t.name,
-                        input: t.input,
-                        expected: t.expected ?? 'valid',
-                        confidence: t.confidence ?? fallbackConf,
-                        language: 'typescript',
-                        code: "console.log('resume');"
-                    }))
+                    targetLanguage: latest.population[0].tests[0]?.metadata?.language || 'typescript',
+                    tests: restoredPopulation[0].tests
                 };
             }
         }
@@ -170,24 +302,34 @@ async function bootstrap() {
                 const mapped = suite.tests.map(t => ({
                     name: t.name,
                     input: t.input,
-                    expected: t.expected ?? 'valid',
-                    confidence: t.confidence ?? fallbackConf,
-                    language: 'typescript',
-                    code: t.code || ("console.log('exec','" + t.name + "')")
+                    expected: t.expected,
+                    code: t.code || ("console.log('exec','" + t.name + "')"),
+                    metadata: {
+                        targetFile: t.metadata?.targetFile || '',
+                        language: detectedLanguage,
+                        origin: t.metadata?.origin || 'mutated',
+                        generation: gen,
+                        confidence: t.metadata?.confidence || fallbackConf
+                    }
                 }));
-                const runnerSuite = { id: `evo_${gen}`, targetLanguage: 'typescript', tests: mapped };
+                const runnerSuite = { id: `evo_${gen}`, targetLanguage: detectedLanguage, tests: mapped };
                 return testRunner.runGeneratedTests(runnerSuite);
             } });
         // Raccogli risultati e genera report
         const mappedReportTests = best.testSuite.tests.map(t => ({
             name: t.name,
             input: t.input,
-            expected: t.expected ?? 'valid',
-            confidence: t.confidence ?? (0, metrics_1.emergenceThreshold)(best.testSuite.tests.length),
-            language: 'typescript',
-            code: "console.log('exec', '" + t.name + "');"
+            expected: t.expected,
+            code: t.code || "console.log('exec', '" + t.name + "');",
+            metadata: {
+                targetFile: t.metadata?.targetFile || '',
+                language: detectedLanguage,
+                origin: t.metadata?.origin || 'mutated',
+                generation: gen,
+                confidence: t.metadata?.confidence || (0, metrics_1.emergenceThreshold)(best.testSuite.tests.length)
+            }
         }));
-        const testResults = await testRunner.runGeneratedTests({ id: `report_gen_${gen}`, targetLanguage: 'typescript', tests: mappedReportTests });
+        const testResults = await testRunner.runGeneratedTests({ id: `report_gen_${gen}`, targetLanguage: detectedLanguage, tests: mappedReportTests });
         // Real coverage instrumentation
         const coverageData = await coverageEngine.instrumentCode(mappedReportTests.map(t => t.name));
         // inject coverage metrics into state meta for snapshot

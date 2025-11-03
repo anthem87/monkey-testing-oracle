@@ -9,14 +9,8 @@
  * ===========================================================
  */
 
-import { optimalAdaptationRate } from '../metrics/metrics';
-
-export interface GeneratedTest {
-    name: string;
-    input: any;
-    confidence?: number;
-    metadata?: Record<string, any>;
-}
+import { optimalAdaptationRate } from '../metrics/metrics.js';
+import { GeneratedTest } from './types.js';
 
 export interface MutationContext {
     domain: "frontend" | "backend";
@@ -120,7 +114,7 @@ export const MutationStrategies: MutationStrategy[] = [
         description: "Boundary values and numeric edges",
         probability: probBoundary,
         apply: async (test) => {
-            const values = [0, 1, -1, Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER];
+            const values = ["0", "1", "-1", String(Number.MAX_SAFE_INTEGER), String(Number.MIN_SAFE_INTEGER)];
             return { ...test, input: values[Math.floor(Math.random() * values.length)] };
         },
     },
@@ -131,10 +125,10 @@ export const MutationStrategies: MutationStrategy[] = [
         probability: probTypeFlip,
         apply: async (test) => {
             const v = test.input;
-            if (typeof v === "boolean") return { ...test, input: !v };
-            if (typeof v === "number") return { ...test, input: v.toString() };
-            if (typeof v === "string") return { ...test, input: v.split("").reverse().join("") };
-            return test;
+            // Since input is now string, apply string mutations
+            if (v === "true" || v === "false") return { ...test, input: v === "true" ? "false" : "true" };
+            if (!isNaN(Number(v))) return { ...test, input: String(-Number(v)) };
+            return { ...test, input: v.split("").reverse().join("") };
         },
     },
     {
@@ -159,7 +153,8 @@ export const MutationStrategies: MutationStrategy[] = [
         probability: probSecurity,
         apply: async (test, ctx) => {
             const newInput = await securityEngine.applyDynamicPayload(String(test.input), ctx);
-            return { ...test, input: newInput, name: `${test.name}_sec` };
+            // Don't change test name to avoid file duplication
+            return { ...test, input: newInput };
         },
     },
     {

@@ -11,7 +11,7 @@ import { OracleManager } from './oracle';
 import { ReportEngine } from './report';
 import { StateTracker } from './state';
 import { TestRunner } from './runner';
-import type { GeneratedTest as MutationGeneratedTest } from './mutation';
+import type { GeneratedTest } from './types.js';
 import { PersistenceManager } from './persistence';
 
 async function runSmoke() {
@@ -32,10 +32,16 @@ async function runSmoke() {
   const stateTracker = new StateTracker(oracleManager, { selection: 'tournament(3)', crossover: 'uniform', mutation: 'adaptive', elitism: 'top-1', oracleUpdate: 'gradient' });
   evolutionEngine.setStateTracker(stateTracker);
 
-  const suite: { tests: MutationGeneratedTest[] } = {
+  const suite: { tests: GeneratedTest[] } = {
     tests: [
-      { name: 'ok_case', input: 'abc', confidence: 1 },
-      { name: 'compile_err', input: 'xyz', confidence: 0.8 }
+      { 
+        name: 'ok_case', input: 'abc', expected: 'valid', code: 'console.log("ok");',
+        metadata: { targetFile: '', origin: 'copilot-initial', confidence: 1 }
+      },
+      { 
+        name: 'compile_err', input: 'xyz', expected: 'valid', code: 'console.log("err");',
+        metadata: { targetFile: '', origin: 'copilot-initial', confidence: 0.8 }
+      }
     ]
   };
 

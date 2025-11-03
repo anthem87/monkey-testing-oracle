@@ -10,7 +10,8 @@
  */
 
 // Import mutation framework (ensure 'core' folder included in tsconfig)
-import { MutationRegistry, MutationContext, GeneratedTest } from "./mutation";
+import { MutationRegistry, MutationContext } from "./mutation";
+import { GeneratedTest } from "./types"; // ✅ Use complete type from types.ts
 import { StateTracker, MetaModelState } from './state';
 import { emergenceThreshold, optimalAdaptationRate, qualityMetric } from '../metrics/metrics';
 
@@ -132,32 +133,70 @@ export class EvolutionEngine {
 
     private initializePopulation(base: GeneratedTestSuite) {
         this.population = [];
+        // STRATEGIA: Ogni individuo rappresenta UN SINGOLO TEST
+        // Questo riduce drasticamente le compilazioni Maven (da 20×5=100 a 20×1=20)
+        const baseTests = base.tests;
+        
         for (let i = 0; i < this.config.populationSize; i++) {
+            // Ruota sui test base e crea varianti
+            const testIndex = i % baseTests.length;
+            const singleTest = baseTests[testIndex];
+            
             this.population.push({
                 id: `ind_${i}_${Date.now()}`,
-                testSuite: base,
+                testSuite: {
+                    tests: [singleTest] // SINGOLO TEST per individuo
+                },
                 fitness: 0,
                 age: 0,
             });
         }
+        console.log(`🧬 Population initialized: ${this.config.populationSize} individuals (1 test each)`);
     }
 
     private async evaluatePopulation(testRunner: any) {
-        await Promise.all(
-            this.population.map(async (ind) => {
-                try {
-                    const runnerSuite = { id: ind.id, targetLanguage: 'typescript', tests: ind.testSuite.tests };
-                    const results = await testRunner.runGeneratedTests(runnerSuite);
-                    ind.fitness = this.calculateFitness(results);
-                    ind.age++;
-                } catch {
-                    ind.fitness = emergenceThreshold(this.config.populationSize);
-                }
-            })
-        );
+        // 🚀 BATCH COMPILATION MODE: Scrivi tutti i test insieme, compila UNA VOLTA
+        // Invece di 20 compilazioni Maven sequenziali → 1 singola compilazione
+        
+        console.log(`🔬 Evaluating ${this.population.length} individuals (batch mode)...`);
+        
+        // Aggrega tutti i test in una singola suite
+        const allTests = this.population.flatMap(ind => ind.testSuite.tests);
+        const batchSuite = {
+            id: 'batch_evaluation',
+            targetLanguage: this.population[0]?.testSuite.tests[0]?.metadata?.language || 'typescript',
+            tests: allTests
+        };
+        
+        console.log(`📝 Writing ${allTests.length} tests in batch...`);
+        
+        // Esegui compilazione + tests in batch (UNA SOLA VOLTA)
+        try {
+            const batchResults = await testRunner.runGeneratedTests(batchSuite);
+            
+            // Distribuisci i risultati ai rispettivi individui
+            let resultIndex = 0;
+            for (const ind of this.population) {
+                const numTests = ind.testSuite.tests.length; // sempre 1 ora
+                const indResults = batchResults.slice(resultIndex, resultIndex + numTests);
+                resultIndex += numTests;
+                
+                ind.fitness = this.calculateFitness(indResults, ind); // Pass individual for novelty
+                ind.age++;
+            }
+            
+            console.log(`✅ Batch evaluation completed for ${this.population.length} individuals`);
+        } catch (error) {
+            console.error(`❌ Batch compilation failed:`, error);
+            // Fallback: assegna fitness minimo a tutti
+            for (const ind of this.population) {
+                ind.fitness = emergenceThreshold(this.config.populationSize);
+                ind.age++;
+            }
+        }
     }
 
-    private calculateFitness(results: TestExecutionResult[]): number {
+    private calculateFitness(results: TestExecutionResult[], individual?: EvolutionIndividual): number {
         if (results.length === 0) return 0;
         const passRate = results.filter((r) => r.passed).length / results.length;
         const perf = 1 - Math.min(1, results.map((r) => r.executionTime).reduce((a, b) => a + b, 0) / 10000);
@@ -177,7 +216,71 @@ export class EvolutionEngine {
         const w_sec = 0.1 + 0.1 * q;      // 0.1-0.2 based on quality
         const w_comp = 0.4 - 0.2 * q;     // 0.2-0.4 inversely
         
-        return Math.max(0, Math.min(1, w_pass * passRate + w_perf * perf + w_sec * sec + w_comp * fComp));
+        const baseFitness = Math.max(0, Math.min(1, w_pass * passRate + w_perf * perf + w_sec * sec + w_comp * fComp));
+        
+        // 🧬 NOVELTY BONUS: Preserve unique edge cases even if fitness is low
+        if (individual) {
+            const novelty = this.calculateNoveltyScore(individual);
+            return 0.7 * baseFitness + 0.3 * novelty; // 70% fitness + 30% novelty
+        }
+        
+        return baseFitness;
+    }
+
+    /**
+     * 🔬 Calculate novelty score - semantic distance from rest of population
+     * Higher = more unique = preserves edge cases
+     */
+    private calculateNoveltyScore(individual: EvolutionIndividual): number {
+        if (this.population.length <= 1) return 1.0;
+        
+        const test = individual.testSuite.tests[0]; // Single test per individual
+        if (!test) return 0;
+        
+        let maxDistance = 0;
+        for (const other of this.population) {
+            if (other.id === individual.id) continue;
+            
+            const otherTest = other.testSuite.tests[0];
+            if (!otherTest) continue;
+            
+            // Levenshtein distance on input values (normalized)
+            const distance = this.levenshteinDistance(test.input, otherTest.input) / 
+                           Math.max(test.input.length, otherTest.input.length, 1);
+            maxDistance = Math.max(maxDistance, distance);
+        }
+        
+        return Math.min(1, maxDistance); // Cap at 1.0
+    }
+
+    /**
+     * Calculate Levenshtein distance between two strings
+     */
+    private levenshteinDistance(a: string, b: string): number {
+        const matrix: number[][] = [];
+        
+        for (let i = 0; i <= b.length; i++) {
+            matrix[i] = [i];
+        }
+        for (let j = 0; j <= a.length; j++) {
+            matrix[0][j] = j;
+        }
+        
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1,
+                        matrix[i][j - 1] + 1,
+                        matrix[i - 1][j] + 1
+                    );
+                }
+            }
+        }
+        
+        return matrix[b.length][a.length];
     }
 
     private selectParents(): EvolutionIndividual[] {
@@ -206,8 +309,9 @@ export class EvolutionEngine {
             const p1 = parents[Math.floor(Math.random() * parents.length)];
             const p2 = parents[Math.floor(Math.random() * parents.length)];
 
+            // 🧬 SEMANTIC CROSSOVER: Combine tests with different strategies
             const child = Math.random() < this.config.crossoverRate
-                ? this.crossover(p1, p2)
+                ? this.semanticCrossover(p1, p2)
                 : structuredClone(p1);
 
             if (Math.random() < this.config.mutationRate) {
@@ -225,21 +329,53 @@ export class EvolutionEngine {
         return newPop;
     }
 
-    private crossover(p1: EvolutionIndividual, p2: EvolutionIndividual): EvolutionIndividual {
-        const tests: GeneratedTest[] = [];
-        const max = Math.max(p1.testSuite.tests.length, p2.testSuite.tests.length);
-        for (let i = 0; i < max; i++) {
-            const t1 = p1.testSuite.tests[i];
-            const t2 = p2.testSuite.tests[i];
-            tests.push(Math.random() < 0.5 ? t1 || t2 : t2 || t1);
+    /**
+     * 🧬 SEMANTIC CROSSOVER: Combine input values from different tests
+     * Creates hybrid edge cases by merging strategies
+     */
+    private semanticCrossover(p1: EvolutionIndividual, p2: EvolutionIndividual): EvolutionIndividual {
+        const t1 = p1.testSuite.tests[0];
+        const t2 = p2.testSuite.tests[0];
+        
+        if (!t1 || !t2) return structuredClone(p1);
+        
+        // Extract input values from test code using regex
+        const extractInputs = (code: string): string[] => {
+            const matches = code.matchAll(/"([^"]+)"|'([^']+)'|null|\d+/g);
+            return Array.from(matches).map(m => m[0]);
+        };
+        
+        const inputs1 = extractInputs(t1.code);
+        const inputs2 = extractInputs(t2.code);
+        
+        // Hybrid strategy: mix inputs from both parents
+        let childCode = t1.code;
+        if (inputs1.length > 0 && inputs2.length > 0) {
+            // Replace first input from t1 with random input from t2
+            const randomInput2 = inputs2[Math.floor(Math.random() * inputs2.length)];
+            childCode = childCode.replace(inputs1[0], randomInput2);
         }
+        
         return {
             id: `child_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            testSuite: { tests },
+            testSuite: {
+                tests: [{
+                    ...t1,
+                    code: childCode,
+                    input: `hybrid(${t1.input},${t2.input})`,
+                    metadata: {
+                        ...t1.metadata,
+                        origin: 'mutated' as const,
+                        generation: (t1.metadata.generation || 0) + 1
+                    }
+                }]
+            },
             fitness: 0,
             age: 0,
         };
     }
+
+    // OLD crossover rimosso, ora usiamo semanticCrossover già definito sopra
 
     private async mutateTestSuite(
         suite: GeneratedTestSuite,

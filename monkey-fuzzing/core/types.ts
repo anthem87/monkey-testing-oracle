@@ -30,7 +30,15 @@ export interface GeneratedTest {
     language?: string; // Language of the test code
     origin: 'copilot-initial' | 'mutated' | 'repaired';
     generation?: number; // Evolution generation when produced
+    confidence?: number; // Oracle prediction confidence
   };
+}
+
+export interface GeneratedTestSuite {
+  id: string;
+  targetLanguage?: "java" | "python" | "rust" | "typescript";
+  tests: GeneratedTest[];
+  outputDir?: string;
 }
 
 export interface CopilotAPI {

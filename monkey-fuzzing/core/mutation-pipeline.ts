@@ -4,7 +4,7 @@
  */
 import { CopilotFixEngine } from './copilot-fix';
 import { NormalizedError } from './error-classifier';
-import { GeneratedTest } from './mutation';
+import { GeneratedTest } from './types.js';
 
 export interface CompilationError {
   testName: string;
@@ -16,16 +16,16 @@ export interface CompilationError {
 export class MutationPipeline {
   constructor(private copilotFixEngine: CopilotFixEngine) {}
 
-  async applyIntelligentFixes(test: GeneratedTest & { code?: string }, error: NormalizedError, generation: number): Promise<GeneratedTest & { code?: string }> {
+  async applyIntelligentFixes(test: GeneratedTest, error: NormalizedError, generation: number): Promise<GeneratedTest> {
     const fixes = await this.copilotFixEngine.generateFixes(error, generation, 3);
     const best = this.copilotFixEngine.selectBestFix(fixes);
     if (!best) return test;
     return this.copilotFixEngine.applyFix(test, best);
   }
 
-  async processErrors(tests: (GeneratedTest & { code?: string })[], errors: NormalizedError[], generation: number): Promise<(GeneratedTest & { code?: string })[]> {
+  async processErrors(tests: GeneratedTest[], errors: NormalizedError[], generation: number): Promise<GeneratedTest[]> {
     const byName = new Map(errors.map(e => [e.testName, e]));
-    const repaired: (GeneratedTest & { code?: string })[] = [];
+    const repaired: GeneratedTest[] = [];
     for (const t of tests) {
       const err = byName.get(t.name);
       if (err) {

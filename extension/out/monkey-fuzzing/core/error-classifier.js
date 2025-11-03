@@ -20,9 +20,11 @@ class ErrorClassifier {
             return undefined;
         const raw = (stderr || '') + (stdout || '');
         let kind = 'unknown';
-        if (/SyntaxError|TypeError|ReferenceError|Parsing error/i.test(raw))
+        // Build tool errors (Maven, Gradle, etc.) - agnostic approach
+        if (/\[ERROR\]/i.test(raw))
             kind = 'compile';
-        else if (/AssertionError|RangeError|UnhandledPromise/i.test(raw))
+        // Runtime errors
+        else if (/AssertionError|RangeError|UnhandledPromise|Exception|Error:/i.test(raw))
             kind = 'runtime';
         else if (/ETIMEDOUT|Timeout|Exceeded/i.test(raw))
             kind = 'timeout';

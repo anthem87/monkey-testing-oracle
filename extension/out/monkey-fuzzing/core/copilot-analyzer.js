@@ -30,7 +30,18 @@ class CopilotAnalyzer {
     }
     async analyzeFile(projectPath, filePath) {
         const abs = path_1.default.isAbsolute(filePath) ? filePath : path_1.default.join(projectPath, filePath);
-        const fileContent = await fs_1.promises.readFile(abs, 'utf8');
+        console.log(`🔍 Reading file: ${abs}`);
+        // Try to read the file - if path is wrong, this will throw a clear error
+        let fileContent;
+        try {
+            fileContent = await fs_1.promises.readFile(abs, 'utf8');
+            console.log(`✅ File read successfully (${fileContent.length} bytes)`);
+        }
+        catch (error) {
+            console.error(`❌ Failed to read file: ${abs}`);
+            console.error(`Error: ${error.message}`);
+            throw new Error(`Cannot read file: ${abs}. Make sure the path is accessible. Error: ${error.message}`);
+        }
         const languageGuess = this.detectLanguage(filePath);
         const prompt = `Analyze this ${languageGuess} file and extract:
 
@@ -74,19 +85,34 @@ ${this.wrapCode(languageGuess, fileContent)}
             returnType: m.returnType,
             scenarios: m.testScenarios || []
         }));
-        const prompt = `Generate 3-5 unit tests for the following ${analysis.language} component.
-Focus on: normal cases, boundary values, error handling, null/empty inputs. Prefer concise but meaningful assertions.
+        const prompt = `Generate 3-5 COMPLETE, COMPILABLE unit tests for the following ${analysis.language} class.
 
-**IMPORTANT**: Return ONLY a valid JSON array, no markdown code blocks, no explanations.
+Each test must be a COMPLETE, standalone, executable test (not just assertion fragments).
+Include: package declaration, imports, class/function declaration, setup code, test methods, and assertions.
 
-Expected JSON format: array of objects with fields: name, code, input, expected.
+**CRITICAL for Java/Kotlin**: 
+- Start with: package ${analysis.package};
+- Include all necessary imports (JUnit, Mockito, class under test, etc.)
+- Make tests compilable as-is
 
-Context:
+**IMPORTANT**: Return ONLY valid JSON (no markdown blocks, no explanations).
+
+JSON Schema:
+[
+  {
+    "name": "testName_scenario",
+    "code": "COMPLETE test code starting with package declaration, then imports, then test class",
+    "input": "description of test input",
+    "expected": "expected behavior"
+  }
+]
+
+Class to test:
 ${JSON.stringify({
             className: analysis.className,
             package: analysis.package,
             methods: methodsForPrompt,
-            sourceFile: analysis.sourceFile
+            language: analysis.language
         }, null, 2)}
 `;
         const raw = await this.copilotAPI.generate(prompt);

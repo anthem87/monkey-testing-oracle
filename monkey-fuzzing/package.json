@@ -16,11 +16,13 @@
     "test:e2e:debug": "playwright test --debug",
     "playwright:install": "playwright install --with-deps",
     "lint": "eslint src --ext ts,tsx",
-  "preview": "vite preview",
-  "evolution:demo": "tsx core/main.ts --config ./config/evolution.json",
+    "preview": "vite preview",
+    "evolution": "tsx core/main.ts",
+    "evolution:demo": "tsx core/main.ts --config ./config/evolution.json",
+    "evolution:sandbox": "tsx core/main.ts",
     "analyze": "tsx core/main.ts --target-file",
     "test:smoke": "ts-node core/test-smoke.ts",
-  "coverage:demo": "c8 --reporter=text --reporter=lcov ts-node core/main.ts --config ./config/evolution.json"
+    "coverage:demo": "c8 --reporter=text --reporter=lcov ts-node core/main.ts --config ./config/evolution.json"
   },
   "keywords": [
     "typescript",

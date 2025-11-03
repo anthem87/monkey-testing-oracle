@@ -22,37 +22,94 @@ export class VSCodeCopilotAdapter implements CopilotAPI {
     }
 
     try {
-      // Use GitHub Copilot model via VS Code API
-      const models = await this.vscode.lm.selectChatModels({
-        vendor: 'copilot',
-        family: 'gpt-4'
+      // Get all available models
+      const allModels = await this.vscode.lm.selectChatModels();
+      
+      console.log(`📋 Raw models from VS Code: ${allModels.map((m: any) => m.id).join(', ')}`);
+
+      // Filter only REAL invocable models (exclude auto/mini/paygo/placeholder)
+      const models = allModels.filter((m: any) => {
+        const isGitHub = m.vendor === 'github' || m.vendor === 'copilot';
+        const isNotPlaceholder = !/auto|paygo|o3-mini|claude|gemini|grok/i.test(m.id);
+        const isNotBlacklisted = !['gpt-4.1', 'gpt-4o.1', 'gpt-5-mini'].some(bad => m.id.includes(bad));
+        return isGitHub && isNotPlaceholder && isNotBlacklisted;
       });
 
       if (models.length === 0) {
-        throw new Error('No Copilot model available. Is GitHub Copilot enabled?');
+        console.warn('⚠️  No supported Copilot models found after filtering.');
+        console.log('Available raw models:', allModels.map((m: any) => `${m.id} (vendor: ${m.vendor})`));
+        throw new Error('No supported Copilot models available. Is GitHub Copilot active?');
       }
 
-      const model = models[0];
+      console.log(`✅ Filtered models: ${models.map((m: any) => m.id).join(', ')}`);
+
+      // Debug: show model capabilities
+      for (const model of models) {
+        console.log(`  ${model.id} | vendor=${model.vendor} | supportsChat=${model.supportsChat || 'unknown'}`);
+      }
+
+      // Prioritize stable models
+      const preferredModel = 
+        models.find((m: any) => m.id.includes('gpt-4o')) ||
+        models.find((m: any) => m.id.includes('gpt-4-turbo')) ||
+        models.find((m: any) => m.id.includes('gpt-4')) ||
+        models.find((m: any) => m.id.includes('gpt-3.5')) ||
+        models[0];
+
+      console.log(`🎯 Selected preferred model: ${preferredModel.id}`);
       
-      // Create message for Copilot
-      const messages = [
-        this.vscode.LanguageModelChatMessage.User(prompt)
-      ];
+      // Try preferred model first, then fallback to others
+      const orderedModels = [preferredModel, ...models.filter((m: any) => m !== preferredModel)];
 
-      // Send request to Copilot
-      const response = await model.sendRequest(
-        messages,
-        {},
-        new this.vscode.CancellationTokenSource().token
-      );
+      let lastError = null;
+      for (const model of orderedModels) {
+        console.log(`🔄 Trying model: ${model.id}`);
 
-      // Collect streaming response
-      let result = '';
-      for await (const chunk of response.text) {
-        result += chunk;
+        try {
+          const userMsg = this.vscode.LanguageModelChatMessage.User(prompt);
+          const token = new this.vscode.CancellationTokenSource().token;
+
+          let response: any;
+
+          if (typeof model.startChat === 'function') {
+            // ✅ Nuova API Chat (gpt-4o, gpt-4-turbo, etc.)
+            console.log(`  → Using startChat API for ${model.id}`);
+            const chat = await model.startChat({
+              systemPrompt: 'You are a code-generation assistant for test fuzzing and security analysis.'
+            });
+            response = await chat.sendRequest(userMsg, {}, token);
+          } else if (typeof model.sendRequest === 'function') {
+            // 🧩 Vecchia API (Codex, legacy models)
+            console.log(`  → Using sendRequest API for ${model.id}`);
+            response = await model.sendRequest([userMsg], {}, token);
+          } else {
+            console.warn(`⚠️  Model ${model.id} has no supported API methods`);
+            continue;
+          }
+
+          let result = '';
+          for await (const chunk of response.text) result += chunk;
+          
+          if (!result || result.trim().length === 0) {
+            console.warn(`⚠️  Model ${model.id} returned empty response`);
+            continue;
+          }
+
+          console.log(`✅ SUCCESS with model: ${model.id} (${result.length} chars)`);
+          return result.trim();
+
+        } catch (err: any) {
+          console.warn(`❌ Model ${model.id} failed:`, err.message || err.code || 'unknown error');
+          lastError = err;
+          continue;
+        }
       }
 
-      return result.trim();
+      // All models failed
+      throw new Error(
+        `All models failed. Tried: ${orderedModels.map((m: any) => m.id).join(', ')}. ` +
+        `Last error: ${lastError?.message || lastError?.code || 'unknown'}`
+      );
 
     } catch (error) {
       console.error('Copilot API error:', error);

@@ -22,12 +22,21 @@
       {
         "command": "monkey-fuzzing.analyzeCurrentFile",
         "title": "Monkey Fuzzing: Analyze & Generate Tests"
+      },
+      {
+        "command": "monkey-fuzzing.runEvolution",
+        "title": "Monkey Fuzzing: Run Evolution Pipeline"
       }
     ],
     "menus": {
       "editor/context": [
         {
           "command": "monkey-fuzzing.analyzeCurrentFile",
+          "group": "navigation",
+          "when": "resourceLangId == java || resourceLangId == python || resourceLangId == typescript"
+        },
+        {
+          "command": "monkey-fuzzing.runEvolution",
           "group": "navigation",
           "when": "resourceLangId == java || resourceLangId == python || resourceLangId == typescript"
         }

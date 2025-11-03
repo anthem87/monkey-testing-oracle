@@ -11,7 +11,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MutationRegistry = exports.MutationStrategies = exports.SecurityEngine = void 0;
-const metrics_1 = require("../metrics/metrics");
+const metrics_js_1 = require("../metrics/metrics.js");
 // ===========================================================
 // SECURITY ENGINE (dynamic payloads)
 // ===========================================================
@@ -29,7 +29,7 @@ class SecurityEngine {
         const chosen = this.pickWeightedPattern();
         let payload = chosen.template;
         // Use optimalAdaptationRate as probability threshold for dynamic generation
-        const copilotThreshold = (0, metrics_1.optimalAdaptationRate)(this.patterns.length);
+        const copilotThreshold = (0, metrics_js_1.optimalAdaptationRate)(this.patterns.length);
         if (ctx.copilotAdapter && Math.random() < copilotThreshold) {
             const prompt = `
 Generate a new ${chosen.category} payload for ${ctx.language} (${ctx.domain}).
@@ -49,7 +49,7 @@ Keep same syntax, short output.`;
     updateSuccess(id, success) {
         const pattern = this.patterns.find((p) => p.id === id);
         // Use adaptationRate for update factor instead of hardcoded multipliers
-        const updateFactor = (0, metrics_1.optimalAdaptationRate)(this.patterns.length);
+        const updateFactor = (0, metrics_js_1.optimalAdaptationRate)(this.patterns.length);
         if (pattern)
             pattern.successRate *= success ? (1 + updateFactor) : (1 - updateFactor / 2);
     }
@@ -71,7 +71,7 @@ const securityEngine = new SecurityEngine();
 // Compute formal strategy probabilities based on optimal adaptation rate
 // Total must sum to ~1.0 distributed across 5 strategies
 const NUM_STRATEGIES = 5;
-const baseRate = (0, metrics_1.optimalAdaptationRate)(NUM_STRATEGIES);
+const baseRate = (0, metrics_js_1.optimalAdaptationRate)(NUM_STRATEGIES);
 // Distribute probability: higher weight to boundary/security, lower to copilot/encoding
 const probBoundary = baseRate * 2.5; // ~0.18 for dim=5
 const probTypeFlip = baseRate * 1.5; // ~0.11
@@ -85,7 +85,7 @@ exports.MutationStrategies = [
         description: "Boundary values and numeric edges",
         probability: probBoundary,
         apply: async (test) => {
-            const values = [0, 1, -1, Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER];
+            const values = ["0", "1", "-1", String(Number.MAX_SAFE_INTEGER), String(Number.MIN_SAFE_INTEGER)];
             return { ...test, input: values[Math.floor(Math.random() * values.length)] };
         },
     },
@@ -96,13 +96,12 @@ exports.MutationStrategies = [
         probability: probTypeFlip,
         apply: async (test) => {
             const v = test.input;
-            if (typeof v === "boolean")
-                return { ...test, input: !v };
-            if (typeof v === "number")
-                return { ...test, input: v.toString() };
-            if (typeof v === "string")
-                return { ...test, input: v.split("").reverse().join("") };
-            return test;
+            // Since input is now string, apply string mutations
+            if (v === "true" || v === "false")
+                return { ...test, input: v === "true" ? "false" : "true" };
+            if (!isNaN(Number(v)))
+                return { ...test, input: String(-Number(v)) };
+            return { ...test, input: v.split("").reverse().join("") };
         },
     },
     {
@@ -127,7 +126,8 @@ exports.MutationStrategies = [
         probability: probSecurity,
         apply: async (test, ctx) => {
             const newInput = await securityEngine.applyDynamicPayload(String(test.input), ctx);
-            return { ...test, input: newInput, name: `${test.name}_sec` };
+            // Don't change test name to avoid file duplication
+            return { ...test, input: newInput };
         },
     },
     {

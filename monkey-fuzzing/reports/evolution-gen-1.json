@@ -1,51 +1,52 @@
 {
   "generation": 1,
-  "timestamp": "2025-11-02T18:15:47.383Z",
+  "timestamp": "2025-11-03T00:09:10.603Z",
   "summary": {
     "totalTests": 1,
     "passed": 0,
     "failed": 1,
     "oracleAccuracy": 0,
-    "entropy": 0,
-    "variance": 0,
-    "avgExecutionTime": 897.8401480019093,
-    "slowestTest": "testDoThingNormal",
+    "entropy": 0.8812908992306927,
+    "variance": 0.007317333333333334,
+    "avgExecutionTime": 0,
+    "slowestTest": "none",
     "discoveredPatterns": 1,
-    "performanceIndex": 0.5269147673226449,
+    "performanceIndex": 1,
     "complexity": 180.62588931160624,
-    "qualityIndex": 0.33516860766892903,
-    "maturityIndex": 0.5,
-    "convergenceThreshold": 0.001,
+    "qualityIndex": 0.6265108477742197,
+    "maturityIndex": 0.5475602395115043,
+    "convergenceThreshold": 0.1,
     "semanticCoverage": 0,
     "structuralCoverage": 1,
     "totalCoverage": 0.5
   },
   "topIndividuals": [
     {
-      "id": "ind_0_1762107322356",
-      "fitness": 0
+      "id": "ind_0_1762128530825",
+      "fitness": 0.1866666666666667
     },
     {
-      "id": "ind_0_1762107322356",
-      "fitness": 0
+      "id": "ind_1_1762128530825",
+      "fitness": 0.1866666666666667
     },
     {
-      "id": "ind_0_1762107322356",
-      "fitness": 0
+      "id": "ind_2_1762128530825",
+      "fitness": 0.1866666666666667
     }
   ],
   "recommendations": [
     "🔴 Accuracy bassa — ricalibrare l'oracolo o aumentare il training data.",
-    "🧊 Entropia bassa — aggiungere più diversità nelle mutazioni.",
+    "⚖️ Fitness instabile — controllare le strategie evolutive.",
     "🧠 Sistema non maturo — proseguire l'evoluzione per maggiore stabilità.",
+    "🏆 Alta qualità strutturale — salvare configurazione come baseline.",
     "🐢 Performance scarsa — ottimizzare test lenti o eliminare ridondanze."
   ],
   "trend": {
-    "avgFitness": 0,
-    "avgAccuracy": 0,
-    "entropyTrend": 0,
-    "maturityTrend": 0.5,
-    "convergenceScore": 0.001,
+    "avgFitness": 0.05600000000000002,
+    "avgAccuracy": 0.05600000000000002,
+    "entropyTrend": 0.8812908992306927,
+    "maturityTrend": 0.5156758353662769,
+    "convergenceScore": 0.1,
     "emergenceProbability": 0.8174258141649446
   }
 }

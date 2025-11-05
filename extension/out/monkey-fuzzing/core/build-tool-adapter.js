@@ -23,6 +23,12 @@ const execAsync = (0, util_1.promisify)(child_process_1.exec);
  * Maven adapter for Java projects
  */
 class MavenAdapter {
+    constructor() {
+        this.copilotAdapter = null;
+    }
+    setCopilotAdapter(adapter) {
+        this.copilotAdapter = adapter;
+    }
     async canHandle(projectRoot) {
         try {
             await fs_1.promises.access(path_1.default.join(projectRoot, 'pom.xml'));
@@ -62,8 +68,8 @@ class MavenAdapter {
                 env
             });
             const executionTime = Date.now() - startTime;
-            // Parse Maven output
-            const results = this.parseMavenOutput(stdout);
+            // Parse Maven output (with AI semantic understanding)
+            const results = await this.parseMavenOutput(stdout);
             return {
                 success: true,
                 stdout,
@@ -75,7 +81,7 @@ class MavenAdapter {
         }
         catch (error) {
             const executionTime = Date.now() - startTime;
-            const results = this.parseMavenOutput(error.stdout || '');
+            const results = await this.parseMavenOutput(error.stdout || '');
             return {
                 success: false,
                 stdout: error.stdout || '',
@@ -113,17 +119,42 @@ class MavenAdapter {
                 maxBuffer: 1024 * 1024 * 10,
                 env
             });
-            const errors = this.extractCompilationErrors(stdout + stderr);
+            const errors = await this.extractCompilationErrors(stdout + stderr);
             return { success: errors.length === 0, errors };
         }
         catch (error) {
             const output = (error.stdout || '') + (error.stderr || '');
-            const errors = this.extractCompilationErrors(output);
+            const errors = await this.extractCompilationErrors(output);
             return { success: false, errors };
         }
     }
-    parseMavenOutput(output) {
-        // Parse "Tests run: X, Failures: Y, Errors: Z, Skipped: W"
+    async parseMavenOutput(output) {
+        // 🤖 Try Copilot-based semantic parsing first
+        if (this.copilotAdapter) {
+            try {
+                const prompt = `Parse this Maven test output and return ONLY a JSON object with test statistics.
+
+Maven output:
+\`\`\`
+${output.substring(0, 1000)} // Truncate for performance
+\`\`\`
+
+Return format: {"testsRun": X, "testsPassed": Y, "testsFailed": Z}`;
+                const response = await this.copilotAdapter.sendPrompt(prompt);
+                const jsonMatch = response.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    if (parsed.testsRun !== undefined) {
+                        console.log(`✅ Copilot parsed Maven output: ${parsed.testsRun} tests`);
+                        return parsed;
+                    }
+                }
+            }
+            catch (err) {
+                console.warn('⚠️ Copilot parsing failed, using regex fallback');
+            }
+        }
+        // 📐 Fallback: regex parsing
         const match = output.match(/Tests run: (\d+), Failures: (\d+), Errors: (\d+)/);
         if (match) {
             const testsRun = parseInt(match[1]);
@@ -137,12 +168,37 @@ class MavenAdapter {
         }
         return { testsRun: 0, testsPassed: 0, testsFailed: 0 };
     }
-    extractCompilationErrors(output) {
+    async extractCompilationErrors(output) {
+        // 🤖 Try Copilot-based semantic error extraction
+        if (this.copilotAdapter) {
+            try {
+                const prompt = `Extract all compilation errors from this Maven output. Return ONLY a JSON array of error messages.
+
+Maven output:
+\`\`\`
+${output.substring(0, 2000)} // Truncate for performance
+\`\`\`
+
+Return format: ["error1", "error2", ...]`;
+                const response = await this.copilotAdapter.sendPrompt(prompt);
+                const jsonMatch = response.match(/\[[\s\S]*\]/);
+                if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        console.log(`✅ Copilot extracted ${parsed.length} compilation errors`);
+                        return parsed;
+                    }
+                }
+            }
+            catch (err) {
+                console.warn('⚠️ Copilot error extraction failed, using regex fallback');
+            }
+        }
+        // 📐 Fallback: simple [ERROR] line matching
         const errors = [];
         const lines = output.split('\n');
         for (const line of lines) {
             if (line.includes('[ERROR]') && !line.includes('BUILD FAILURE')) {
-                // Keep [ERROR] prefix for error classification
                 errors.push(line.trim());
             }
         }

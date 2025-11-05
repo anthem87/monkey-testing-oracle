@@ -14,86 +14,159 @@ class VSCodeCopilotAdapter {
     constructor(vscodeModule) {
         this.vscode = vscodeModule;
     }
+    /**
+     * 🔧 Alias for generate() - used by many modules
+     */
+    async sendPrompt(prompt) {
+        return this.generate(prompt);
+    }
+    /**
+     * 🧬 Generate mutation suggestions (alias for generate)
+     */
+    async generateMutation(prompt) {
+        return this.generate(prompt);
+    }
+    /**
+     * Generate structured test output from Copilot
+     * @param prompt - Original prompt
+     * @param options - Generation options (language, testType, etc.)
+     * @returns JSON with {className, package, imports, fields, methods, testCode}
+     */
+    async generateStructured(prompt, options) {
+        const structuredPrompt = `
+${prompt}
+
+IMPORTANT: Respond ONLY with valid JSON in this exact format:
+{
+  "className": "GeneratedTestClass",
+  "package": "com.example.test",
+  "imports": ["import org.junit.jupiter.api.Test;", "import static org.mockito.Mockito.*;"],
+  "fields": ["@Mock\\nprivate HttpServletRequest request;", "@Mock\\nprivate HttpServletResponse response;"],
+  "methods": [
+    {
+      "name": "testMethodName",
+      "annotations": ["@Test"],
+      "signature": "void testMethodName() throws Exception",
+      "body": "// test body here\\nassertEquals(expected, actual);"
+    }
+  ]
+}
+
+Do NOT include markdown code blocks, explanations, or any text outside the JSON structure.
+Language: ${options?.language || 'java'}
+`;
+        const jsonResponse = await this.generate(structuredPrompt);
+        try {
+            // Extract JSON from markdown code blocks if present
+            const jsonMatch = jsonResponse.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) ||
+                jsonResponse.match(/(\{[\s\S]*\})/);
+            if (!jsonMatch) {
+                console.warn('⚠️ Copilot did not return JSON. Raw response:', jsonResponse.slice(0, 200));
+                throw new Error('Copilot response is not valid JSON');
+            }
+            return JSON.parse(jsonMatch[1]);
+        }
+        catch (parseError) {
+            console.error('❌ Failed to parse Copilot JSON:', parseError);
+            console.log('Raw response:', jsonResponse.slice(0, 500));
+            throw new Error(`Copilot returned invalid JSON: ${parseError}`);
+        }
+    }
     async generate(prompt) {
+        console.log('\n🚀 [VSCodeCopilotAdapter] generate() called');
         if (!this.vscode?.lm) {
             throw new Error('VS Code Language Model API not available. Are you running inside VS Code Extension?');
         }
         try {
-            // Get all available models
+            console.log('📞 Calling selectChatModels()...');
+            // ✅ Get ALL available models (no filter)
             const allModels = await this.vscode.lm.selectChatModels();
-            console.log(`📋 Raw models from VS Code: ${allModels.map((m) => m.id).join(', ')}`);
-            // Filter only REAL invocable models (exclude auto/mini/paygo/placeholder)
-            const models = allModels.filter((m) => {
-                const isGitHub = m.vendor === 'github' || m.vendor === 'copilot';
-                const isNotPlaceholder = !/auto|paygo|o3-mini|claude|gemini|grok/i.test(m.id);
-                const isNotBlacklisted = !['gpt-4.1', 'gpt-4o.1', 'gpt-5-mini'].some(bad => m.id.includes(bad));
-                return isGitHub && isNotPlaceholder && isNotBlacklisted;
+            console.log(`✅ selectChatModels() returned ${allModels.length} models`);
+            console.log(`\n📋 ALL AVAILABLE MODELS (${allModels.length} found):`);
+            allModels.forEach((m, i) => {
+                console.log(`  [${i}] ${m.id}`);
+                console.log(`      vendor: ${m.vendor}`);
+                console.log(`      family: ${m.family || 'N/A'}`);
+                console.log(`      version: ${m.version || 'N/A'}`);
+                console.log(`      maxInputTokens: ${m.maxInputTokens || 'N/A'}`);
             });
-            if (models.length === 0) {
-                console.warn('⚠️  No supported Copilot models found after filtering.');
-                console.log('Available raw models:', allModels.map((m) => `${m.id} (vendor: ${m.vendor})`));
-                throw new Error('No supported Copilot models available. Is GitHub Copilot active?');
+            if (allModels.length === 0) {
+                throw new Error('No language models available. Is GitHub Copilot extension installed?');
             }
-            console.log(`✅ Filtered models: ${models.map((m) => m.id).join(', ')}`);
-            // Debug: show model capabilities
-            for (const model of models) {
-                console.log(`  ${model.id} | vendor=${model.vendor} | supportsChat=${model.supportsChat || 'unknown'}`);
-            }
-            // Prioritize stable models
-            const preferredModel = models.find((m) => m.id.includes('gpt-4o')) ||
-                models.find((m) => m.id.includes('gpt-4-turbo')) ||
-                models.find((m) => m.id.includes('gpt-4')) ||
-                models.find((m) => m.id.includes('gpt-3.5')) ||
-                models[0];
-            console.log(`🎯 Selected preferred model: ${preferredModel.id}`);
-            // Try preferred model first, then fallback to others
-            const orderedModels = [preferredModel, ...models.filter((m) => m !== preferredModel)];
-            let lastError = null;
-            for (const model of orderedModels) {
-                console.log(`🔄 Trying model: ${model.id}`);
-                try {
-                    const userMsg = this.vscode.LanguageModelChatMessage.User(prompt);
-                    const token = new this.vscode.CancellationTokenSource().token;
-                    let response;
-                    if (typeof model.startChat === 'function') {
-                        // ✅ Nuova API Chat (gpt-4o, gpt-4-turbo, etc.)
-                        console.log(`  → Using startChat API for ${model.id}`);
-                        const chat = await model.startChat({
-                            systemPrompt: 'You are a code-generation assistant for test fuzzing and security analysis.'
-                        });
-                        response = await chat.sendRequest(userMsg, {}, token);
-                    }
-                    else if (typeof model.sendRequest === 'function') {
-                        // 🧩 Vecchia API (Codex, legacy models)
-                        console.log(`  → Using sendRequest API for ${model.id}`);
-                        response = await model.sendRequest([userMsg], {}, token);
-                    }
-                    else {
-                        console.warn(`⚠️  Model ${model.id} has no supported API methods`);
-                        continue;
-                    }
-                    let result = '';
-                    for await (const chunk of response.text)
-                        result += chunk;
-                    if (!result || result.trim().length === 0) {
-                        console.warn(`⚠️  Model ${model.id} returned empty response`);
-                        continue;
-                    }
-                    console.log(`✅ SUCCESS with model: ${model.id} (${result.length} chars)`);
-                    return result.trim();
-                }
-                catch (err) {
-                    console.warn(`❌ Model ${model.id} failed:`, err.message || err.code || 'unknown error');
-                    lastError = err;
-                    continue;
+            // 🎯 FILTER OUT known problematic models AND prioritize working ones
+            const preferredModelIds = [
+                'copilot-gpt-4o',
+                'copilot-gpt-4',
+                'gpt-4o',
+                'gpt-4-turbo',
+                'gpt-4'
+            ];
+            // Try to find a preferred model first
+            let selectedModel = null;
+            for (const modelId of preferredModelIds) {
+                const model = allModels.find((m) => m.id === modelId || m.id.includes(modelId));
+                if (model) {
+                    console.log(`✅ Found preferred model: ${model.id}`);
+                    selectedModel = model;
+                    break;
                 }
             }
-            // All models failed
-            throw new Error(`All models failed. Tried: ${orderedModels.map((m) => m.id).join(', ')}. ` +
-                `Last error: ${lastError?.message || lastError?.code || 'unknown'}`);
+            // If no preferred model, filter out problematic ones
+            if (!selectedModel) {
+                console.warn('⚠️ No preferred model found, filtering...');
+                const validModels = allModels.filter((m) => {
+                    const id = m.id || '';
+                    // Skip gpt-5-mini and gpt-5 (NOT SUPPORTED)
+                    if (id.includes('gpt-5')) {
+                        console.log(`  ❌ Skipping ${id} (gpt-5 not supported)`);
+                        return false;
+                    }
+                    // Skip models with version numbers (gpt-4.1, gpt-4o.1, etc)
+                    if (/\.\d+$/.test(id)) {
+                        console.log(`  ❌ Skipping ${id} (versioned model)`);
+                        return false;
+                    }
+                    // Skip non-copilot vendors
+                    if (m.vendor && m.vendor !== 'copilot') {
+                        console.log(`  ❌ Skipping ${id} (vendor: ${m.vendor})`);
+                        return false;
+                    }
+                    return true;
+                });
+                if (validModels.length > 0) {
+                    selectedModel = validModels[0];
+                }
+            }
+            console.log(`\n✅ VALID MODELS after filtering`);
+            if (!selectedModel) {
+                throw new Error('No compatible models available. Models found: ' +
+                    allModels.map((m) => m.id).join(', '));
+            }
+            const model = selectedModel;
+            console.log(`\n🎯 SELECTED MODEL: ${model.id}`);
+            console.log(`   vendor: ${model.vendor}`);
+            console.log(`   family: ${model.family || 'N/A'}`);
+            console.log(`   Sending chat request...\n`);
+            const messages = [
+                this.vscode.LanguageModelChatMessage.User(prompt)
+            ];
+            console.log(`📤 Calling model.sendRequest() with ${messages.length} messages...`);
+            const chatResponse = await model.sendRequest(messages, {}, new this.vscode.CancellationTokenSource().token);
+            console.log(`✅ sendRequest() completed, reading response...`);
+            let result = '';
+            for await (const fragment of chatResponse.text) {
+                result += fragment;
+            }
+            if (!result || result.trim().length === 0) {
+                throw new Error(`Model ${model.id} returned empty response`);
+            }
+            console.log(`✅ Received ${result.length} characters\n`);
+            return result.trim();
         }
         catch (error) {
-            console.error('Copilot API error:', error);
+            console.error('\n❌ COPILOT ERROR:', error.message);
+            if (error.cause)
+                console.error('Cause:', error.cause);
             throw new Error(`Failed to generate with Copilot: ${error.message}`);
         }
     }

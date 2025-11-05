@@ -1,6 +1,43 @@
 # 🧊 Convergence Plateau Fix - Implementation Plan
 
-## 📊 Problem Statement
+## � **CRITICAL BUG DISCOVERED** (2025-11-03)
+
+### **False Positive Fitness from Novelty Score**
+
+**Problem**: Tests che **NON compilano** ricevono fitness > 0 grazie al novelty bonus.
+
+**Root Cause**:
+```typescript
+// OLD (BUGGY):
+baseFitness = 0 (all compilation errors)
+novelty = 0.3-1.0 (Levenshtein distance)
+TOTAL FITNESS = 0.7 * 0 + 0.3 * novelty = 0.15-0.30 ❌
+
+// This allows non-compiling tests to survive and reproduce!
+```
+
+**Impact**:
+- Gen 9 aveva fitness 0.037-0.062 con **100% compilation errors**
+- Sistema evolveva **sintassi credibile ma semanticamente invalida**
+- Popolazione convergeva su "test plausibili" invece di "test funzionanti"
+
+**Fix Implemented**:
+```typescript
+// NEW (FIXED):
+if (compilationRate === 0) {
+  return 0.05 * novelty; // Max 5% fitness (debugging only)
+}
+// Novelty bonus applies ONLY if baseFitness > 0.1
+```
+
+**Expected Result**:
+- Test non compilabili: fitness < 0.05 (estinzione rapida)
+- Test compilabili ma failing: fitness 0.1-0.5 (evoluzione possibile)
+- Test compilabili e passing: fitness 0.5-1.0 (dominanza)
+
+---
+
+## �📊 Problem Statement
 
 **Observed**: Gen 6 → Gen 9 raggiunge convergenza semantica completa
 - **Entropy**: 0.837 → 0.72 → plateau

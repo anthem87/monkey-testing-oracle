@@ -9,6 +9,39 @@
  *  - raccoglie risultati, tempi ed errori
  * ===========================================================
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -39,6 +72,14 @@ class TestRunner {
         this.lastErrors = [];
         this.buildToolAdapter = null;
         this.projectRoot = null;
+        this.copilotAdapter = null; // AI assistant for smart analysis
+    }
+    /**
+     * Set Copilot adapter for AI-powered features
+     */
+    setCopilotAdapter(adapter) {
+        this.copilotAdapter = adapter;
+        console.log('[TestRunner] Copilot adapter configured');
     }
     /**
      * Initialize build tool detection for a project
@@ -79,6 +120,12 @@ class TestRunner {
             if (!compileResult.success && compileResult.errors.length > 0) {
                 console.log(`⚠️ Compilation failed with ${compileResult.errors.length} errors`);
                 compileResult.errors.slice(0, 3).forEach(e => console.log(`  - ${e.substring(0, 120)}`));
+                // 🔍 Check for missing dependencies using Copilot
+                const { analyzeMissingDependencies, formatDependencyWarning } = await Promise.resolve().then(() => __importStar(require('./dependency-checker.js')));
+                const missing = await analyzeMissingDependencies(compileResult.errors, this.copilotAdapter);
+                if (missing.length > 0) {
+                    console.error(formatDependencyWarning(missing));
+                }
                 // Classify compilation errors for feedback loop
                 for (const error of compileResult.errors) {
                     const classified = this.errorClassifier.classify('compilation-error', error);
@@ -159,62 +206,22 @@ class TestRunner {
             baseTestDir = path_1.default.join(this.projectRoot, 'src', '__tests__');
         }
         await promises_1.default.mkdir(baseTestDir, { recursive: true });
-        // Write each test file
-        for (const test of suite.tests) {
-            const ext = this.getFileExtension(test.metadata.language || suite.targetLanguage);
-            let filePath;
-            if (suite.targetLanguage === 'java' && test.code) {
-                // Extract package from Java code
-                let packageMatch = test.code.match(/package\s+([\w.]+);/);
-                // If no package declaration, try to infer from imports
-                if (!packageMatch) {
-                    // Find all imports and skip standard libraries
-                    const imports = test.code.match(/import\s+(?:static\s+)?[\w.]+;/g) || [];
-                    let inferredPackage = null;
-                    for (const imp of imports) {
-                        const match = imp.match(/import\s+(?:static\s+)?([\w.]+)\.\w+;/);
-                        if (match) {
-                            const fullImport = match[1];
-                            // Skip JUnit, Mockito, and Java standard libraries
-                            if (!fullImport.startsWith('org.junit') &&
-                                !fullImport.startsWith('org.mockito') &&
-                                !fullImport.startsWith('java.') &&
-                                !fullImport.startsWith('javax.')) {
-                                inferredPackage = fullImport;
-                                console.log(`📦 Inferred package from import: ${inferredPackage} (from: ${imp.trim()})`);
-                                break;
-                            }
-                        }
-                    }
-                    if (inferredPackage) {
-                        packageMatch = [null, inferredPackage];
-                        // Add package declaration to code
-                        test.code = `package ${inferredPackage};\n\n${test.code}`;
-                        console.log(`✏️ Added package declaration to ${test.name}`);
-                    }
-                    else {
-                        console.log(`⚠️ No valid package found in imports (checked ${imports.length} imports)`);
-                    }
+        // For Java: merge all tests into a single class file
+        if (suite.targetLanguage === 'java' && suite.tests.length > 0) {
+            const { TestWriter } = await Promise.resolve().then(() => __importStar(require('./test-writer.js')));
+            const writer = new TestWriter();
+            await writer.writeTests(baseTestDir, suite.tests, suite.targetLanguage, this.copilotAdapter);
+            console.log(`✅ Merged ${suite.tests.length} Java tests into single class file`);
+        }
+        else {
+            // For other languages: write individual test files
+            for (const test of suite.tests) {
+                const ext = this.getFileExtension(test.metadata.language || suite.targetLanguage);
+                const filePath = path_1.default.join(baseTestDir, `${test.name}.${ext}`);
+                if (test.code) {
+                    await promises_1.default.writeFile(filePath, test.code, 'utf-8');
+                    console.log(`📝 Writing test to: ${test.name}.${ext}`);
                 }
-                if (packageMatch) {
-                    const packageName = packageMatch[1];
-                    const packagePath = packageName.replace(/\./g, path_1.default.sep);
-                    const packageDir = path_1.default.join(baseTestDir, packagePath);
-                    await promises_1.default.mkdir(packageDir, { recursive: true });
-                    filePath = path_1.default.join(packageDir, `${test.name}.${ext}`);
-                    console.log(`📝 Writing test to: ${packagePath}/${test.name}.${ext}`);
-                }
-                else {
-                    // No package found, write to base dir
-                    filePath = path_1.default.join(baseTestDir, `${test.name}.${ext}`);
-                    console.log(`⚠️ No package found for ${test.name}, writing to base dir`);
-                }
-            }
-            else {
-                filePath = path_1.default.join(baseTestDir, `${test.name}.${ext}`);
-            }
-            if (test.code) {
-                await promises_1.default.writeFile(filePath, test.code, 'utf-8');
             }
         }
         return baseTestDir;

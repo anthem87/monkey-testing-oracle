@@ -21,7 +21,11 @@ class EvolutionEngine {
         this.population = [];
         this.fitnessHistory = [];
         this.stateMeta = { fitnessHistory: [] };
+        this.copilotAdapter = null;
         this.mutationRegistry = new mutation_1.MutationRegistry(domain);
+    }
+    setCopilotAdapter(adapter) {
+        this.copilotAdapter = adapter;
     }
     setConfig(cfg) {
         this.config = cfg;
@@ -142,24 +146,38 @@ class EvolutionEngine {
     calculateFitness(results, individual) {
         if (results.length === 0)
             return 0;
+        // 🚨 CRITICAL FIX: If ALL tests fail compilation, fitness MUST be near-zero
+        // Novelty should NOT compensate for non-compiling code
+        const compileErrors = results.filter(r => r.error || (r.stderr && /SyntaxError|TypeError|ReferenceError|Parsing error|cannot find symbol|package .* does not exist/i.test(r.stderr || ''))).length;
+        const compilationRate = 1 - compileErrors / results.length; // 0 if all fail, 1 if all compile
+        // If NOTHING compiles, return minimal fitness (novelty-only mode)
+        if (compilationRate === 0) {
+            // Allow tiny fitness from novelty to preserve diverse errors for debugging
+            const novelty = individual ? this.calculateNoveltyScore(individual) : 0;
+            console.warn(`🚨 NON-COMPILING TEST: fitness=${(0.05 * novelty).toFixed(3)} (novelty=${novelty.toFixed(2)}, ${compileErrors}/${results.length} errors)`);
+            return 0.05 * novelty; // Max 5% fitness for non-compiling code
+        }
+        // Normal fitness calculation for compilable tests
         const passRate = results.filter((r) => r.passed).length / results.length;
         const perf = 1 - Math.min(1, results.map((r) => r.executionTime).reduce((a, b) => a + b, 0) / 10000);
         const sec = results.filter((r) => r.securityAlert).length / results.length;
-        const compileErrors = results.filter(r => r.error || (r.stderr && /SyntaxError|TypeError|ReferenceError|Parsing error/i.test(r.stderr || ''))).length;
-        const fComp = 1 - compileErrors / results.length; // f_comp(I) = 1 - #err_comp / |T|
         // Use qualityMetric to derive weights: higher quality means more emphasis on pass rate
         const entropy = passRate;
         const variance = Math.abs(perf - passRate);
-        const complexity = sec + (1 - fComp);
+        const complexity = sec + (1 - compilationRate);
         const q = (0, metrics_1.qualityMetric)(entropy, variance, complexity);
         // Formal weights derived from quality metric
         const w_pass = 0.3 + 0.2 * q; // 0.3-0.5 based on quality
         const w_perf = 0.2 + 0.1 * (1 - q); // 0.2-0.3 inversely
         const w_sec = 0.1 + 0.1 * q; // 0.1-0.2 based on quality
-        const w_comp = 0.4 - 0.2 * q; // 0.2-0.4 inversely
-        const baseFitness = Math.max(0, Math.min(1, w_pass * passRate + w_perf * perf + w_sec * sec + w_comp * fComp));
-        // 🧬 NOVELTY BONUS: Preserve unique edge cases even if fitness is low
-        if (individual) {
+        const w_comp = 0.4 - 0.2 * q; // 0.2-0.4 inversely (MUST compile!)
+        const baseFitness = Math.max(0, Math.min(1, w_pass * passRate +
+            w_perf * perf +
+            w_sec * sec +
+            w_comp * compilationRate // Changed from fComp to compilationRate
+        ));
+        // 🧬 NOVELTY BONUS: Only significant if base fitness > 0.1
+        if (individual && baseFitness > 0.1) {
             const novelty = this.calculateNoveltyScore(individual);
             return 0.7 * baseFitness + 0.3 * novelty; // 70% fitness + 30% novelty
         }
@@ -230,8 +248,8 @@ class EvolutionEngine {
             const p1 = parents[Math.floor(Math.random() * parents.length)];
             const p2 = parents[Math.floor(Math.random() * parents.length)];
             // 🧬 SEMANTIC CROSSOVER: Combine tests with different strategies
-            const child = Math.random() < this.config.crossoverRate
-                ? this.semanticCrossover(p1, p2)
+            const child = Math.random() < 0.5
+                ? await this.semanticCrossover(p1, p2)
                 : structuredClone(p1);
             if (Math.random() < this.config.mutationRate) {
                 const ctx = {
@@ -249,18 +267,44 @@ class EvolutionEngine {
      * 🧬 SEMANTIC CROSSOVER: Combine input values from different tests
      * Creates hybrid edge cases by merging strategies
      */
-    semanticCrossover(p1, p2) {
+    async semanticCrossover(p1, p2) {
         const t1 = p1.testSuite.tests[0];
         const t2 = p2.testSuite.tests[0];
         if (!t1 || !t2)
             return structuredClone(p1);
-        // Extract input values from test code using regex
-        const extractInputs = (code) => {
-            const matches = code.matchAll(/"([^"]+)"|'([^']+)'|null|\d+/g);
-            return Array.from(matches).map(m => m[0]);
+        // 🤖 Extract input values using Copilot (semantic understanding)
+        const extractInputs = async (code) => {
+            if (!this.copilotAdapter) {
+                // Fallback: simple regex for literals
+                const matches = code.matchAll(/"([^"]+)"|'([^']+)'|null|\d+/g);
+                return Array.from(matches).map(m => m[0]);
+            }
+            try {
+                const prompt = `Extract all input values from this test code. Return ONLY a JSON array of strings.
+
+Test code:
+\`\`\`
+${code}
+\`\`\`
+
+Return format: ["value1", "value2", ...]`;
+                const response = await this.copilotAdapter.sendPrompt(prompt);
+                const jsonMatch = response.match(/\[[\s\S]*\]/);
+                if (jsonMatch) {
+                    return JSON.parse(jsonMatch[0]);
+                }
+                // Fallback on parse error
+                const matches = code.matchAll(/"([^"]+)"|'([^']+)'|null|\d+/g);
+                return Array.from(matches).map(m => m[0]);
+            }
+            catch {
+                // Fallback on any error
+                const matches = code.matchAll(/"([^"]+)"|'([^']+)'|null|\d+/g);
+                return Array.from(matches).map(m => m[0]);
+            }
         };
-        const inputs1 = extractInputs(t1.code);
-        const inputs2 = extractInputs(t2.code);
+        const inputs1 = await extractInputs(t1.code);
+        const inputs2 = await extractInputs(t2.code);
         // Hybrid strategy: mix inputs from both parents
         let childCode = t1.code;
         if (inputs1.length > 0 && inputs2.length > 0) {

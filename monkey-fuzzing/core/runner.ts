@@ -48,8 +48,17 @@ export class TestRunner {
     private lastErrors: NormalizedError[] = [];
     private buildToolAdapter: BuildToolAdapter | null = null;
     private projectRoot: string | null = null;
+    private copilotAdapter: any = null; // AI assistant for smart analysis
 
     constructor(private workspaceRoot = process.cwd()) { }
+
+    /**
+     * Set Copilot adapter for AI-powered features
+     */
+    setCopilotAdapter(adapter: any): void {
+        this.copilotAdapter = adapter;
+        console.log('[TestRunner] Copilot adapter configured');
+    }
 
     /**
      * Initialize build tool detection for a project
@@ -97,6 +106,14 @@ export class TestRunner {
             if (!compileResult.success && compileResult.errors.length > 0) {
                 console.log(`⚠️ Compilation failed with ${compileResult.errors.length} errors`);
                 compileResult.errors.slice(0, 3).forEach(e => console.log(`  - ${e.substring(0, 120)}`));
+                
+                // 🔍 Check for missing dependencies using Copilot
+                const { analyzeMissingDependencies, formatDependencyWarning } = await import('./dependency-checker.js');
+                const missing = await analyzeMissingDependencies(compileResult.errors, this.copilotAdapter);
+                
+                if (missing.length > 0) {
+                    console.error(formatDependencyWarning(missing));
+                }
                 
                 // Classify compilation errors for feedback loop
                 for (const error of compileResult.errors) {
@@ -189,11 +206,7 @@ export class TestRunner {
         if (suite.targetLanguage === 'java' && suite.tests.length > 0) {
             const { TestWriter } = await import('./test-writer.js');
             const writer = new TestWriter();
-<<<<<<< HEAD
-            await writer.writeTests(baseTestDir, suite.tests, suite.targetLanguage);
-=======
-            await writer.writeTests(suite.tests, baseTestDir, suite.targetLanguage);
->>>>>>> be92b25 (work in progress)
+            await writer.writeTests(baseTestDir, suite.tests, suite.targetLanguage, this.copilotAdapter);
             console.log(`✅ Merged ${suite.tests.length} Java tests into single class file`);
         } else {
             // For other languages: write individual test files

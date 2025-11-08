@@ -153,7 +153,8 @@ async function bootstrap() {
         const sandboxMgr = new sandbox_manager_1.SandboxManager();
         const testWriter = new test_writer_1.TestWriter();
         const sandboxInfo = await sandboxMgr.setup(projectRoot, targetFileArg);
-        const analysis = await analyzer.analyzeFile(projectRoot, targetFileArg);
+        // Analyze target file
+        const analysis = await analyzer.analyzeFile(targetFileArg);
         const initialTests = await analyzer.generateInitialTests(analysis);
         await testWriter.writeTests(sandboxInfo.testsPath, initialTests, analysis.language);
         targetLanguage = analysis.language || 'typescript';

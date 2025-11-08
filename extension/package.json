@@ -20,25 +20,26 @@
   "contributes": {
     "commands": [
       {
-        "command": "monkey-fuzzing.analyzeCurrentFile",
-        "title": "Monkey Fuzzing: Analyze & Generate Tests"
+        "command": "monkey-fuzzing.evolutionRunner",
+        "title": "Monkey Fuzzing: Evolution Runner"
       },
       {
-        "command": "monkey-fuzzing.runEvolution",
-        "title": "Monkey Fuzzing: Run Evolution Pipeline"
+        "command": "monkey-fuzzing.resumeEvolution",
+        "title": "Monkey Fuzzing: Resume Evolution"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "monkey-fuzzing.analyzeCurrentFile",
+          "command": "monkey-fuzzing.evolutionRunner",
           "group": "navigation",
-          "when": "resourceLangId == java || resourceLangId == python || resourceLangId == typescript"
-        },
+          "when": "resourceLangId == java"
+        }
+      ],
+      "commandPalette": [
         {
-          "command": "monkey-fuzzing.runEvolution",
-          "group": "navigation",
-          "when": "resourceLangId == java || resourceLangId == python || resourceLangId == typescript"
+          "command": "monkey-fuzzing.resumeEvolution",
+          "title": "Monkey Fuzzing: Resume Evolution"
         }
       ]
     }

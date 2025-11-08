@@ -1,0 +1,104 @@
+@startuml Evolution Feedback Loop
+
+!define LOSS_HIGH #FF6B6B
+!define LOSS_MED #FFA94D
+!define LOSS_LOW #4ECDC4
+!define FITNESS_GOOD #51CF66
+
+title Monkey-Fuzzingo: Fitness-Driven Evolution Loop
+
+skinparam backgroundColor #F8F9FA
+skinparam roundcorner 15
+skinparam shadowing false
+
+rectangle "**Generation N**" as gen {
+  
+  rectangle "**1. Test Execution**" as exec {
+    :Compile Test;
+    :Run Test Suite;
+    :Parse Results;
+  }
+  
+  rectangle "**2. Fitness Calculation**" as fitness #FFF3BF {
+    :**Fitness** = 0.7 × compile + 0.3 × testRate;
+    :**Loss** = 1 - Fitness;
+    note right
+      Loss ∈ [0, 1]
+      0 = Perfect
+      1 = Total Failure
+    end note
+  }
+  
+  rectangle "**3. Metrics Analysis**" as metrics LOSS_MED {
+    :Calculate Trend;
+    :Measure Entropy;
+    :Check Convergence;
+    :Compute Diversity;
+  }
+  
+  rectangle "**4. Strategy Selection**" as strategy {
+    if (Loss > 0.5 && Trend < 0?) then (yes)
+      :🔥 **Aggressive Exploration**;
+      note right: Add 5-10 new tests\nSecurity edge cases\nBoundary values
+    elseif (Loss > 0.5 && Trend >= 0?) then (yes)
+      :🎯 **Focused Exploitation**;
+      note right: Keep structure\nEnhance assertions\nAdd 2-3 variants
+    elseif (Loss < 0.3 && !Compile?) then (yes)
+      :🐛 **Bug Fixing**;
+      note right: Fix imports\nFix syntax\nKeep logic intact
+    elseif (Loss < 0.3 && TestsFailed > 0?) then (yes)
+      :🧪 **Edge Case Coverage**;
+      note right: Fix assertions\nBoundary tests\nException handling
+    elseif (Loss < 0.1?) then (yes)
+      :✨ **Fine Tuning**;
+      note right: Optimize clarity\nAdd messages\nStyle consistency
+    else (default)
+      :⚖️ **Balanced Evolution**;
+      note right: Fix errors\nAdd 2-3 tests\nBalance explore/exploit
+    endif
+  }
+  
+  rectangle "**5. Build Evolution Prompt**" as prompt FITNESS_GOOD {
+    :Strategy Instructions;
+    :Current Fitness Metrics;
+    :Compilation Errors;
+    :Test Results Context;
+    :Evolution History (last 3);
+    :Current Test Code;
+  }
+  
+  rectangle "**6. Copilot Generation**" as copilot #E3F2FD {
+    :Send Prompt to Copilot;
+    :Receive Mutated Test;
+    :Extract Java Code;
+    note right
+      Copilot uses ALL context
+      to **minimize loss**
+    end note
+  }
+  
+  rectangle "**7. Save Checkpoint**" as checkpoint LOSS_LOW {
+    :Save Population State;
+    :Save Metrics;
+    :Detect Emergence;
+    note right
+      checkpoint-gen-N.json:
+      - population[]
+      - fitness, entropy
+      - diversity, maturity
+    end note
+  }
+  
+}
+
+exec -down-> fitness
+fitness -down-> metrics
+metrics -down-> strategy
+strategy -down-> prompt
+prompt -down-> copilot
+copilot -down-> checkpoint
+
+checkpoint -right-> gen : **Next Generation**
+note on link: Loop until\nLoss < 0.05\nor Max Gens
+
+@enduml

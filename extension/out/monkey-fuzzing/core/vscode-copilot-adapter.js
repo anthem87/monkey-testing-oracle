@@ -82,19 +82,26 @@ Language: ${options?.language || 'java'}
             // ✅ Get ALL available models (no filter)
             const allModels = await this.vscode.lm.selectChatModels();
             console.log(`✅ selectChatModels() returned ${allModels.length} models`);
-            console.log(`\n📋 ALL AVAILABLE MODELS (${allModels.length} found):`);
-            allModels.forEach((m, i) => {
-                console.log(`  [${i}] ${m.id}`);
-                console.log(`      vendor: ${m.vendor}`);
-                console.log(`      family: ${m.family || 'N/A'}`);
-                console.log(`      version: ${m.version || 'N/A'}`);
-                console.log(`      maxInputTokens: ${m.maxInputTokens || 'N/A'}`);
-            });
+            // Log available models (disabled for cleaner console)
+            // console.log(`\n📋 ALL AVAILABLE MODELS (${allModels.length} found):`);
+            // allModels.forEach((m: any, i: number) => {
+            //   console.log(`  [${i}] ${m.id}`);
+            //   console.log(`      vendor: ${m.vendor}`);
+            //   console.log(`      family: ${m.family || 'N/A'}`);
+            //   console.log(`      version: ${m.version || 'N/A'}`);
+            //   console.log(`      maxInputTokens: ${m.maxInputTokens || 'N/A'}`);
+            // });
             if (allModels.length === 0) {
                 throw new Error('No language models available. Is GitHub Copilot extension installed?');
             }
-            // 🎯 FILTER OUT known problematic models AND prioritize working ones
+            // 🎯 FILTER OUT known problematic models AND prioritize Claude Sonnet 4.5 + Grok fallback
             const preferredModelIds = [
+                'claude-sonnet-4.5', // 🆕 PRIORITY: Claude Sonnet 4.5 (most capable)
+                'claude-sonnet-4',
+                'anthropic.claude-sonnet',
+                'grok-2', // 🆕 FALLBACK: Grok 2 by xAI (when Claude is unavailable)
+                'grok', // 🆕 FALLBACK: Grok by xAI (when Claude is unavailable)
+                'xai.grok', // 🆕 FALLBACK: xAI Grok (when Claude is unavailable)
                 'copilot-gpt-4o',
                 'copilot-gpt-4',
                 'gpt-4o',
@@ -165,6 +172,8 @@ Language: ${options?.language || 'java'}
         }
         catch (error) {
             console.error('\n❌ COPILOT ERROR:', error.message);
+            console.error('Error details:', JSON.stringify(error, null, 2));
+            console.error('Stack trace:', error.stack);
             if (error.cause)
                 console.error('Cause:', error.cause);
             throw new Error(`Failed to generate with Copilot: ${error.message}`);

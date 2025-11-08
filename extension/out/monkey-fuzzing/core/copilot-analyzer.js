@@ -6,181 +6,199 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StubCopilotAPI = exports.CopilotAnalyzer = void 0;
 const fs_1 = require("fs");
 const path_1 = __importDefault(require("path"));
-// Lightweight JSON normalization helpers
-function extractJSON(raw) {
-    // Remove markdown code blocks if present (```json ... ``` or ``` ... ```)
-    const markdownMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (markdownMatch) {
-        return markdownMatch[1].trim();
-    }
-    return raw.trim();
-}
-function safeParse(raw) {
-    try {
-        const cleaned = extractJSON(raw);
-        return JSON.parse(cleaned);
-    }
-    catch (e) {
-        throw new Error(`Copilot response is not valid JSON. Raw:\n${raw}\nError: ${e.message}`);
-    }
-}
 class CopilotAnalyzer {
     constructor(copilotAPI) {
         this.copilotAPI = copilotAPI;
     }
-    async analyzeFile(projectPath, filePath) {
-        const abs = path_1.default.isAbsolute(filePath) ? filePath : path_1.default.join(projectPath, filePath);
-        console.log(`🔍 Reading file: ${abs}`);
-        // Try to read the file - if path is wrong, this will throw a clear error
-        let fileContent;
-        try {
-            fileContent = await fs_1.promises.readFile(abs, 'utf8');
-            console.log(`✅ File read successfully (${fileContent.length} bytes)`);
-        }
-        catch (error) {
-            console.error(`❌ Failed to read file: ${abs}`);
-            console.error(`Error: ${error.message}`);
-            throw new Error(`Cannot read file: ${abs}. Make sure the path is accessible. Error: ${error.message}`);
-        }
-        const languageGuess = this.detectLanguage(filePath);
-        const prompt = `Analyze this ${languageGuess} file and extract:
+    /**
+     * 🎯 NEW WORKFLOW (100% Copilot, NO regex/parsing):
+     * 1. Read Java class from absolute path
+     * 2. Ask Copilot to extract package AND find pom.xml path
+     * 3. Analyze via Copilot LLM (NO parser/AST/regex)
+     * 4. Return analysis with projectRoot
+     */
+    async analyzeFile(absolutePath) {
+        console.log(`🔍 Analyzing: ${absolutePath}`);
+        const content = await fs_1.promises.readFile(absolutePath, 'utf8');
+        console.log(`✅ Read ${content.length} bytes`);
+        // Find project root by locating src/main/java
+        const projectRoot = await this.findProjectRoot(absolutePath);
+        console.log(`📦 Module root: ${projectRoot}`);
+        // 🤖 Ask Copilot for package and className via structured JSON
+        const locationPrompt = `Analyze this Java source file and return ONLY valid JSON:
 
-1. Class/module name and namespace/package (if any)
-2. Public (or exported) method/function signatures with return types
-3. Dependencies/imports
-4. Potential test scenarios (edge, normal, error)
+${content}
 
-**IMPORTANT**: Respond with ONLY valid JSON, no markdown code blocks, no explanations.
-
-JSON schema:
+Return JSON format:
 {
-  "className": "string | optional",
-  "package": "string | optional",
+  "package": "com.example.package",
+  "className": "ClassName"
+}`;
+        const locationRaw = await this.copilotAPI.generate(locationPrompt);
+        // Extract package via Copilot - be VERY explicit
+        const packagePrompt = `Look at this JSON response and return ONLY the package name as plain text (no code, no JSON, no quotes):
+
+${locationRaw}
+
+Example response: it.aicof.desk.security.filter
+
+Your response (package name only):`;
+        let packageName = (await this.copilotAPI.generate(packagePrompt)).trim();
+        // Clean up common Copilot artifacts
+        packageName = packageName
+            .replace(/^```[\w]*\n?/g, '') // Remove code block markers
+            .replace(/\n?```$/g, '')
+            .replace(/^["'`]/g, '') // Remove quotes
+            .replace(/["'`]$/g, '')
+            .replace(/^package\s+/g, '') // Remove 'package' keyword
+            .replace(/;$/g, '') // Remove semicolon
+            .split('\n')[0] // Take first line only
+            .trim();
+        console.log(`📋 Package: ${packageName || 'default'}`);
+        // 🤖 STEP 2: Analyze class structure via Copilot
+        const analysisPrompt = `Analyze this Java class. Extract methods, dependencies, and test scenarios.
+
+**RESPOND ONLY WITH JSON**:
+{
+  "className": "ClassName",
+  "package": "${packageName}",
   "methods": [
     {
-      "name": "string",
-      "parameters": ["<type> <name>", "..."],
-      "returnType": "string",
-      "testScenarios": ["scenario1", "scenario2"]
+      "name": "methodName",
+      "parameters": ["Type paramName"],
+      "returnType": "Type",
+      "testScenarios": ["normal case", "edge case", "error case"]
     }
   ],
-  "dependencies": ["import1", "import2"],
-  "language": "${languageGuess}"
+  "dependencies": ["import statements"],
+  "language": "java"
 }
 
-File path: ${filePath}
 Code:
-
-
-${this.wrapCode(languageGuess, fileContent)}
+${content}
 `;
-        const raw = await this.copilotAPI.generate(prompt);
-        const parsed = safeParse(raw);
-        return { ...parsed, sourceFile: filePath };
+        const analysisRaw = await this.copilotAPI.generate(analysisPrompt);
+        // 🤖 Let Copilot extract fields from its own response
+        const classNamePrompt = `Extract the className from this JSON response:
+
+${analysisRaw}
+
+Return ONLY the class name:`;
+        const className = (await this.copilotAPI.generate(classNamePrompt)).trim();
+        return {
+            className,
+            package: packageName,
+            methods: [], // Copilot will generate tests directly
+            dependencies: [],
+            language: 'java',
+            sourceFile: absolutePath,
+            projectRoot
+        };
     }
-    async generateInitialTests(analysis) {
-        const methodsForPrompt = analysis.methods.map(m => ({
-            name: m.name,
-            parameters: m.parameters,
-            returnType: m.returnType,
-            scenarios: m.testScenarios || []
-        }));
-        const prompt = `Generate 3-5 COMPLETE, COMPILABLE unit tests for the following ${analysis.language} class.
-
-Each test must be a COMPLETE, standalone, executable test (not just assertion fragments).
-Include: package declaration, imports, class/function declaration, setup code, test methods, and assertions.
-
-**CRITICAL for Java/Kotlin**: 
-- Start with: package ${analysis.package};
-- Include all necessary imports (JUnit, Mockito, class under test, etc.)
-- Make tests compilable as-is
-
-**IMPORTANT**: Return ONLY valid JSON (no markdown blocks, no explanations).
-
-JSON Schema:
-[
-  {
-    "name": "testName_scenario",
-    "code": "COMPLETE test code starting with package declaration, then imports, then test class",
-    "input": "description of test input",
-    "expected": "expected behavior"
-  }
-]
-
-Class to test:
-${JSON.stringify({
-            className: analysis.className,
-            package: analysis.package,
-            methods: methodsForPrompt,
-            language: analysis.language
-        }, null, 2)}
-`;
-        const raw = await this.copilotAPI.generate(prompt);
-        const tests = safeParse(raw).map(rawTest => {
-            const origin = 'copilot-initial';
-            return {
-                name: rawTest.name,
-                code: rawTest.code,
-                input: rawTest.input || '',
-                expected: rawTest.expected || '',
-                metadata: {
-                    targetFile: analysis.sourceFile,
-                    language: analysis.language,
-                    origin,
-                    targetMethod: rawTest.metadata?.targetMethod,
-                    complexity: rawTest.metadata?.complexity,
-                    generation: rawTest.metadata?.generation
-                }
-            };
-        });
-        return tests;
-    }
-    detectLanguage(filePath) {
-        const ext = path_1.default.extname(filePath).toLowerCase();
-        switch (ext) {
-            case '.java': return 'java';
-            case '.py': return 'python';
-            case '.ts': return 'typescript';
-            case '.tsx': return 'typescript';
-            case '.js': return 'javascript';
-            case '.c': return 'c';
-            case '.cpp': return 'cpp';
-            case '.rs': return 'rust';
-            default: return 'unknown';
+    /**
+     * Find Maven module root by locating src/main/java in path
+     * For multi-module projects, returns the module directory (where pom.xml is)
+     *
+     * Example:
+     *   Input:  /project/module/src/main/java/com/example/MyClass.java
+     *   Output: /project/module
+     */
+    async findProjectRoot(startPath) {
+        // Normalize path separators (Windows uses backslash)
+        const normalizedPath = startPath.replace(/\\/g, '/');
+        // Look for src/main/java in the path
+        const srcMainJavaIndex = normalizedPath.indexOf('src/main/java');
+        if (srcMainJavaIndex === -1) {
+            throw new Error(`Path does not contain 'src/main/java': ${startPath}`);
+        }
+        // Extract everything before src/main/java (that's the module root)
+        const moduleRoot = normalizedPath.substring(0, srcMainJavaIndex);
+        // Remove trailing slash if present
+        const cleanRoot = moduleRoot.replace(/\/$/, '');
+        // Convert back to Windows path if original was Windows
+        const finalRoot = startPath.includes('\\') ? cleanRoot.replace(/\//g, '\\') : cleanRoot;
+        // Verify pom.xml exists at this location
+        const pomPath = path_1.default.join(finalRoot, 'pom.xml');
+        try {
+            await fs_1.promises.access(pomPath);
+            return finalRoot; // Found pom.xml at module root
+        }
+        catch {
+            throw new Error(`No pom.xml found at expected module root: ${finalRoot}`);
         }
     }
-    wrapCode(_language, code) {
-        return `\n${code}`;
+    /**
+     * Generate initial test suite via Copilot
+     * Returns ONE SINGLE @Test METHOD (not a class!)
+     * The method will be aggregated with others into a class later
+     */
+    async generateInitialTests(analysis) {
+        const prompt = `Generate ONE SINGLE JUnit 5 test method for this Java class.
+
+**CRITICAL REQUIREMENTS**:
+1. Generate ONLY the method body (start with @Test, end with closing })
+2. Do NOT include package, imports, or class declaration
+3. Use descriptive test name (e.g., testValidateJwt_whenNull_thenThrowsException)
+4. Include proper assertions
+5. NO MARKDOWN, NO BACKTICKS, NO EXPLANATIONS
+
+**EXAMPLE OUTPUT**:
+@Test
+public void testMethodName_scenario() {
+    // Arrange
+    MyClass obj = new MyClass();
+    
+    // Act
+    Result result = obj.methodUnderTest();
+    
+    // Assert
+    assertNotNull(result);
+}
+
+Class to test: ${analysis.className}
+Package: ${analysis.package}
+Methods available: ${analysis.methods.map(m => m.name).join(', ')}
+
+Generate a test method for the first/main method.
+Return ONLY the @Test method code:`;
+        const methodCode = await this.copilotAPI.generate(prompt);
+        // Extract method name from @Test annotation
+        const methodNameMatch = methodCode.match(/void\s+(\w+)\s*\(/);
+        const methodName = methodNameMatch ? methodNameMatch[1] : 'testMethod';
+        return [{
+                name: methodName,
+                code: methodCode.trim(),
+                input: 'initial',
+                expected: 'pass',
+                metadata: {
+                    targetFile: analysis.sourceFile,
+                    language: 'java',
+                    origin: 'copilot-initial',
+                    generation: 0
+                }
+            }];
     }
 }
 exports.CopilotAnalyzer = CopilotAnalyzer;
-// Simple in-memory stub for development & tests.
+// Stub for development
 class StubCopilotAPI {
     async generate(prompt) {
-        // Heuristic stub: if asking for analysis, return minimal synthetic JSON.
-        if (/Analyze this/i.test(prompt) && /methods/i.test(prompt)) {
-            const fake = {
+        if (/Analyze this Java class/i.test(prompt)) {
+            return JSON.stringify({
                 className: 'StubClass',
                 package: 'com.example',
-                methods: [
-                    { name: 'doThing', parameters: ['String input'], returnType: 'int', testScenarios: ['normal', 'empty', 'error'] }
-                ],
+                methods: [{ name: 'doThing', parameters: ['String input'], returnType: 'int', testScenarios: ['normal', 'error'] }],
                 dependencies: ['java.util.List'],
                 language: 'java'
-            };
-            return JSON.stringify(fake);
+            });
         }
-        if (/Generate 3-5 unit tests/i.test(prompt)) {
-            const tests = [
-                {
-                    name: 'testDoThingNormal',
-                    code: '/* JUnit test stub */',
-                    input: 'normal string',
-                    expected: 'returns positive int',
-                    metadata: { targetFile: 'Example.java', origin: 'copilot-initial' }
-                }
-            ];
-            return JSON.stringify(tests);
+        if (/Generate a COMPLETE.*JUnit/i.test(prompt)) {
+            return JSON.stringify([{
+                    name: 'StubClassTest',
+                    code: 'package com.example;\n\nimport org.junit.jupiter.api.Test;\n\npublic class StubClassTest {\n  @Test void testDoThing() {}\n}',
+                    input: 'initial',
+                    expected: 'pass'
+                }]);
         }
         return '[]';
     }

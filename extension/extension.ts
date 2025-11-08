@@ -14,8 +14,8 @@ import { SandboxManager } from '../monkey-fuzzing/core/sandbox-manager';
 import { TestWriter } from '../monkey-fuzzing/core/test-writer';
 import { EvolutionEngine } from '../monkey-fuzzing/core/evolution';
 import { TestRunner } from '../monkey-fuzzing/core/runner';
-import { FeedbackEngine } from '../monkey-fuzzing/core/feedback';
 import { ReportEngine } from '../monkey-fuzzing/core/report';
+import { EvolutionRunner } from '../monkey-fuzzing/core/evolution-runner';
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Monkey-Fuzzing extension activated');
@@ -77,7 +77,7 @@ export function activate(context: vscode.ExtensionContext) {
             console.log(`📁 File to analyze (Windows): ${filePath}`);
             
             // Use Windows paths for analyzer (it will read the file)
-            const analysis = await analyzer.analyzeFile(targetProjectRoot, filePath);
+            const analysis = await analyzer.analyzeFile(filePath);
 
             progress.report({ message: 'Generating initial tests...' });
             const tests = await analyzer.generateInitialTests(analysis);
@@ -300,6 +300,196 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(analyzeCommand);
   context.subscriptions.push(evolutionCommand);
+
+  // Register NEW command for EvolutionRunner
+  const evolutionRunnerCommand = vscode.commands.registerCommand(
+    'monkey-fuzzing.evolutionRunner',
+    async () => {
+      console.log('🚀 EvolutionRunner: Command triggered!');
+      
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        console.error('❌ No active editor');
+        vscode.window.showErrorMessage('No active Java file to analyze');
+        return;
+      }
+
+      const filePath = editor.document.uri.fsPath;
+      const language = editor.document.languageId;
+      
+      console.log(`📄 File: ${filePath}`);
+      console.log(`🔤 Language: ${language}`);
+      
+      if (language !== 'java') {
+        console.warn(`⚠️ Not a Java file: ${language}`);
+        vscode.window.showWarningMessage('EvolutionRunner currently supports Java files only');
+        return;
+      }
+
+      // Ask for generations
+      console.log('📝 Prompting for generations...');
+      const generationsInput = await vscode.window.showInputBox({
+        prompt: 'Number of evolution generations',
+        value: '5',
+        validateInput: (v) => isNaN(Number(v)) || Number(v) < 1 ? 'Must be a positive number' : null
+      });
+
+      if (!generationsInput) {
+        console.log('❌ User cancelled input');
+        return;
+      }
+      const generations = Number(generationsInput);
+      console.log(`✅ Generations: ${generations}`);
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Evolutionary Test Generation',
+          cancellable: false
+        },
+        async (progress) => {
+          try {
+            progress.report({ message: 'Initializing EvolutionRunner...' });
+            
+            // Get workspace folder (WSL path)
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+              throw new Error('No workspace folder open!');
+            }
+            
+            // Convert Windows UNC path to WSL Linux path
+            let workspacePath = workspaceFolder.uri.fsPath;
+            if (workspacePath.startsWith('\\\\wsl.localhost\\Ubuntu')) {
+              workspacePath = workspacePath
+                .replace(/\\/g, '/')
+                .replace('//wsl.localhost/Ubuntu', '');
+            }
+            
+            console.log(`📁 Workspace path (converted): ${workspacePath}`);
+            
+            // Create runner with VSCode context for real Copilot
+            const runner = new EvolutionRunner(vscode);
+            
+            progress.report({ message: `Running ${generations} generations...` });
+            
+            // Run evolution
+            await runner.run({
+              targetClassPath: filePath,
+              generations: generations,
+              workspaceRoot: workspacePath  // ✅ Linux path corretto
+            });
+            
+            vscode.window.showInformationMessage(
+              `✅ Evolution completed! Check generated-tests/ folder and project src/test/java/`
+            );
+
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `EvolutionRunner failed: ${(error as Error).message}`
+            );
+            console.error('❌ Evolution error:', error);
+          }
+        }
+      );
+    }
+  );
+
+  context.subscriptions.push(evolutionRunnerCommand);
+
+  // Register RESUME command for EvolutionRunner
+  const resumeEvolutionCommand = vscode.commands.registerCommand(
+    'monkey-fuzzing.resumeEvolution',
+    async () => {
+      console.log('🔄 Resume Evolution: Command triggered!');
+      
+      // Ask user to select checkpoint file
+      const checkpointUris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters: {
+          'Checkpoint Files': ['json']
+        },
+        openLabel: 'Select Checkpoint',
+        title: 'Resume Evolution from Checkpoint'
+      });
+
+      if (!checkpointUris || checkpointUris.length === 0) {
+        console.log('❌ User cancelled checkpoint selection');
+        return;
+      }
+
+      const checkpointPath = checkpointUris[0].fsPath;
+      console.log(`📂 Checkpoint selected: ${checkpointPath}`);
+
+      // Ask for additional generations
+      const generationsInput = await vscode.window.showInputBox({
+        prompt: 'Number of additional generations to run',
+        value: '5',
+        validateInput: (v) => isNaN(Number(v)) || Number(v) < 1 ? 'Must be a positive number' : null
+      });
+
+      if (!generationsInput) {
+        console.log('❌ User cancelled input');
+        return;
+      }
+      const additionalGenerations = Number(generationsInput);
+      console.log(`✅ Additional generations: ${additionalGenerations}`);
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Resuming Evolutionary Testing',
+          cancellable: false
+        },
+        async (progress) => {
+          try {
+            progress.report({ message: 'Loading checkpoint...' });
+            
+            // Get workspace folder (WSL path)
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+              throw new Error('No workspace folder open!');
+            }
+            
+            // Convert Windows UNC path to WSL Linux path
+            let workspacePath = workspaceFolder.uri.fsPath;
+            if (workspacePath.startsWith('\\\\wsl.localhost\\Ubuntu')) {
+              workspacePath = workspacePath
+                .replace(/\\/g, '/')
+                .replace('//wsl.localhost/Ubuntu', '');
+            }
+            
+            console.log(`📁 Workspace path (converted): ${workspacePath}`);
+            
+            // Create runner with VSCode context
+            const runner = new EvolutionRunner(vscode);
+            
+            progress.report({ message: `Resuming with ${additionalGenerations} additional generations...` });
+            
+            // Resume evolution with correct workspace
+            await runner.resume(
+              checkpointPath, 
+              additionalGenerations,
+              workspacePath  // ✅ Linux path corretto
+            );
+            
+            vscode.window.showInformationMessage(
+              `✅ Resumed evolution completed! Check checkpoints/ folder for updates.`
+            );
+
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Resume failed: ${(error as Error).message}`
+            );
+            console.error('❌ Resume error:', error);
+          }
+        }
+      );
+    }
+  );
+
+  context.subscriptions.push(resumeEvolutionCommand);
 }
 
 export function deactivate() {

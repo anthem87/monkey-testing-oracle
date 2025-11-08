@@ -1,19 +1,44 @@
 /**
  * ===========================================================
- * EVOLUTION.TS
+ * EVOLUTION.TS (DETERMINISTIC VERSION)
  * ===========================================================
- * Evolutionary Testing Engine
- * - Population-based mutation and selection
+ * Evolutionary Testing Engine - NO Math.random()
+ * - Population-based mutation and selection (deterministic)
  * - Oracle-guided fitness evaluation
- * - Integrated with MutationRegistry (dynamic + Copilot)
+ * - Uses generation number as seed for reproducibility
  * ===========================================================
  */
 
-// Import mutation framework (ensure 'core' folder included in tsconfig)
 import { MutationRegistry, MutationContext } from "./mutation";
-import { GeneratedTest } from "./types"; // ✅ Use complete type from types.ts
+import { GeneratedTest } from "./types";
 import { StateTracker, MetaModelState } from './state';
-import { emergenceThreshold, optimalAdaptationRate, qualityMetric } from '../metrics/metrics';
+import { emergenceThreshold, optimalAdaptationRate } from '../metrics/metrics';
+import { 
+    fastNonDominatedSort, 
+    calculateCrowdingDistance, 
+    RankedIndividual, 
+    Objectives 
+} from './multi-objective';
+
+// Deterministic hash (same as mutation.ts)
+function deterministicHash(str: string, seed: number): number {
+    let h = seed;
+    for (let i = 0; i < str.length; i++) {
+        h = Math.imul(31, h) + str.charCodeAt(i);
+        h |= 0;
+    }
+    return Math.abs(h);
+}
+
+// Deterministic shuffle (Fisher-Yates with seed)
+function deterministicShuffle<T>(arr: T[], seed: number): T[] {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+        const j = deterministicHash(`${seed}_${i}`, seed) % (i + 1);
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+}
 
 export interface GeneratedTestSuite {
     tests: GeneratedTest[];
@@ -27,6 +52,29 @@ export interface TestExecutionResult {
     securityAlert?: boolean;
     stdout?: string;
     stderr?: string;
+    // 🆕 Multi-objective metrics
+    compilationErrors?: number;
+    resolvedSymbols?: number;
+    totalSymbols?: number;
+    testsRun?: number;
+    testsPassed?: number;
+    newBranchesCovered?: number;
+    totalBranches?: number;
+    uniqueExceptionsFound?: number;
+    totalTests?: number;
+    errorReduction?: number;
+    previousErrors?: number;
+}
+
+/**
+ * 🎯 Multi-Objective Fitness Structure
+ * Replaces single fitness score with 4-dimensional objectives
+ */
+export interface MultiObjectiveFitness {
+    compilation: number;      // 0.0 - 1.0 (compilation success rate)
+    symbolResolution: number; // 0.0 - 1.0 (symbol resolution rate)
+    testExecution: number;    // 0.0 - 1.0 (test pass rate)
+    archetype: number;        // 0.0 - 1.0 (archetype-specific bonus)
 }
 
 export interface EvolutionConfig {
@@ -40,8 +88,13 @@ export interface EvolutionConfig {
 export interface EvolutionIndividual {
     id: string;
     testSuite: GeneratedTestSuite;
-    fitness: number;
+    fitness: number; // Legacy single fitness (kept for backwards compatibility)
+    multiObjectiveFitness?: MultiObjectiveFitness; // 🆕 Multi-objective fitness
     age: number;
+    role?: 'fixer' | 'explorer' | 'breaker'; // 🆕 Behavioral role
+    objectives?: Objectives; // Legacy - will be replaced by multiObjectiveFitness
+    paretoRank?: number; // 🆕 Pareto front ranking
+    crowdingDistance?: number; // 🆕 Diversity metric
 }
 
 export class EvolutionEngine {
@@ -50,7 +103,7 @@ export class EvolutionEngine {
     private mutationRegistry: MutationRegistry;
     private stateTracker?: StateTracker;
     private stateMeta: MetaModelState = { fitnessHistory: [] };
-    private copilotAdapter: any = null;
+    private copilotAdapter: any = null; // Copilot adapter for mutations
 
     constructor(
         private config: EvolutionConfig,
@@ -71,15 +124,16 @@ export class EvolutionEngine {
     applyPopulationResize(newSize: number) {
         if (newSize === this.population.length) return;
         if (newSize > this.population.length) {
-            // clone best to grow
             const best = [...this.population].sort((a,b)=> b.fitness - a.fitness)[0];
+            let counter = 0;
             while (this.population.length < newSize) {
                 this.population.push({
-                    id: `clone_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+                    id: `clone_${counter}_${this.population.length}`,
                     testSuite: structuredClone(best.testSuite),
                     fitness: best.fitness,
                     age: best.age
                 });
+                counter++;
             }
         } else {
             this.population = [...this.population].sort((a,b)=> b.fitness - a.fitness).slice(0,newSize);
@@ -104,9 +158,9 @@ export class EvolutionEngine {
     }
 
     /** Initialize once */
-    initialize(baseSuite: GeneratedTestSuite) {
+    async initialize(baseSuite: GeneratedTestSuite) {
         if (this.population.length === 0) {
-            this.initializePopulation(baseSuite);
+            await this.initializePopulation(baseSuite);
         }
     }
 
@@ -136,27 +190,130 @@ export class EvolutionEngine {
         return this.getBestIndividual();
     }
 
-    private initializePopulation(base: GeneratedTestSuite) {
+    private async initializePopulation(base: GeneratedTestSuite) {
         this.population = [];
-        // STRATEGIA: Ogni individuo rappresenta UN SINGOLO TEST
-        // Questo riduce drasticamente le compilazioni Maven (da 20×5=100 a 20×1=20)
-        const baseTests = base.tests;
+        const baseTest = base.tests[0]; // Single test method
         
-        for (let i = 0; i < this.config.populationSize; i++) {
-            // Ruota sui test base e crea varianti
-            const testIndex = i % baseTests.length;
-            const singleTest = baseTests[testIndex];
+        if (!baseTest) {
+            throw new Error('No base test provided for population initialization');
+        }
+        
+        console.log(`🧬 Generating test class with ${this.config.populationSize} methods incrementally...`);
+        
+        // 📝 Build the class incrementally - start with base method
+        const generatedMethods: string[] = [baseTest.code];
+        const methodNames: string[] = [baseTest.name];
+        
+        // Generate remaining methods one by one, showing context to AI
+        for (let i = 1; i < this.config.populationSize; i++) {
+            const role: 'fixer' | 'explorer' | 'breaker' = 
+                i % 3 === 0 ? 'fixer' : i % 3 === 1 ? 'explorer' : 'breaker';
+            
+            if (this.copilotAdapter) {
+                try {
+                    // Build current class state to show AI what already exists
+                    const currentClassState = `Current test class has ${generatedMethods.length} methods:
+
+${generatedMethods.map((m, idx) => `// Method ${idx + 1}:\n${m}`).join('\n\n')}`;
+
+                    let roleInstructions = '';
+                    if (role === 'fixer') {
+                        roleInstructions = `You are a FIXER. Generate a conservative test that:
+- Tests edge cases (null, empty, invalid input)
+- Validates error handling
+- Checks boundary conditions`;
+                    } else if (role === 'explorer') {
+                        roleInstructions = `You are an EXPLORER. Generate a creative test that:
+- Tests unusual scenarios
+- Uses boundary values (max, min, zero)
+- Explores different code paths`;
+                    } else {
+                        roleInstructions = `You are a BREAKER. Generate an aggressive test that:
+- Tests with invalid/malicious input
+- Tries to break the code
+- Tests security vulnerabilities (injection, XSS, etc.)`;
+                    }
+
+                    const prompt = `${currentClassState}
+
+${roleInstructions}
+
+CRITICAL REQUIREMENTS:
+1. Generate method #${i + 1} that is COMPLETELY DIFFERENT from all ${generatedMethods.length} existing methods
+2. Test a NEW scenario not covered above
+3. Use a UNIQUE method name (different from: ${methodNames.join(', ')})
+4. Return ONLY the @Test method (complete with closing })
+5. NO markdown, NO backticks, NO class wrapper, NO explanations
+
+Generate the next @Test method now:`;
+
+                    const newMethod = await this.copilotAdapter.generate(prompt);
+                    let cleanedCode = newMethod.replace(/```java/g, '').replace(/```/g, '').trim();
+                    
+                    // Ensure closing brace
+                    if (!cleanedCode.endsWith('}')) {
+                        cleanedCode += '\n    }';
+                    }
+                    
+                    // Extract method name
+                    const nameMatch = cleanedCode.match(/void\s+(\w+)\s*\(/);
+                    const methodName = nameMatch ? nameMatch[1] : `testMethod_${role}_${i}`;
+                    
+                    // Add to accumulated methods
+                    generatedMethods.push(cleanedCode);
+                    methodNames.push(methodName);
+                    
+                    console.log(`   ✓ Generated method ${i + 1}/${this.config.populationSize}: ${methodName} (${role})`);
+                    
+                } catch (error) {
+                    console.error(`❌ Failed to generate method ${i + 1}:`, error);
+                    console.warn(`⚠️ Using fallback for method ${i + 1}`);
+                    const fallbackMethod = `@Test\n    public void testFallback_${i}() {\n        // Fallback test\n        assertTrue(true);\n    }`;
+                    generatedMethods.push(fallbackMethod);
+                    methodNames.push(`testFallback_${i}`);
+                }
+            } else {
+                // No Copilot - simple fallback
+                const fallbackMethod = `@Test\n    public void testFallback_${i}() {\n        // Fallback test\n        assertTrue(true);\n    }`;
+                generatedMethods.push(fallbackMethod);
+                methodNames.push(`testFallback_${i}`);
+            }
+        }
+        
+        // Now create ONE individual per method (population = methods in one class)
+        console.log(`\n✅ Generated ${generatedMethods.length} unique methods`);
+        console.log(`   Creating population where each individual = one method...`);
+        
+        for (let i = 0; i < generatedMethods.length; i++) {
+            const role: 'fixer' | 'explorer' | 'breaker' = 
+                i === 0 ? 'fixer' : (i % 3 === 0 ? 'fixer' : i % 3 === 1 ? 'explorer' : 'breaker');
             
             this.population.push({
-                id: `ind_${i}_${Date.now()}`,
+                id: `ind_${i}_gen0`,
                 testSuite: {
-                    tests: [singleTest] // SINGOLO TEST per individuo
+                    tests: [{
+                        name: methodNames[i],
+                        code: generatedMethods[i],
+                        input: 'generated',
+                        expected: 'pass',
+                        metadata: {
+                            targetFile: baseTest.metadata.targetFile,
+                            language: 'java',
+                            origin: 'copilot-initial' as const,
+                            generation: 0
+                        }
+                    }]
                 },
                 fitness: 0,
                 age: 0,
+                role
             });
         }
-        console.log(`🧬 Population initialized: ${this.config.populationSize} individuals (1 test each)`);
+        
+        console.log(`✅ Population initialized: ${this.config.populationSize} individuals`);
+        console.log(`   🟢 Fixers: ${this.population.filter(i => i.role === 'fixer').length}`);
+        console.log(`   🔵 Explorers: ${this.population.filter(i => i.role === 'explorer').length}`);
+        console.log(`   🔴 Breakers: ${this.population.filter(i => i.role === 'breaker').length}`);
     }
 
     private async evaluatePopulation(testRunner: any) {
@@ -179,78 +336,258 @@ export class EvolutionEngine {
         try {
             const batchResults = await testRunner.runGeneratedTests(batchSuite);
             
-            // Distribuisci i risultati ai rispettivi individui
+            // 🎯 PHASE 1: Calculate multi-objective metrics for each individual
             let resultIndex = 0;
             for (const ind of this.population) {
-                const numTests = ind.testSuite.tests.length; // sempre 1 ora
+                const numTests = ind.testSuite.tests.length;
                 const indResults = batchResults.slice(resultIndex, resultIndex + numTests);
                 resultIndex += numTests;
                 
-                ind.fitness = this.calculateFitness(indResults, ind); // Pass individual for novelty
+                // Calculate multi-objective fitness
+                const { objectives, aggregatedFitness } = this.calculateMultiObjectiveFitness(indResults, ind);
+                
+                ind.objectives = objectives;
+                ind.fitness = aggregatedFitness; // Keep for backward compatibility
                 ind.age++;
             }
             
+            // 🏆 PHASE 2: Pareto ranking - assign ranks and crowding distance
+            const rankedIndividuals: RankedIndividual[] = this.population.map(ind => ({
+                id: ind.id,
+                testCode: ind.testSuite.tests[0]?.code || '',
+                testName: ind.testSuite.tests[0]?.name || ind.id,
+                generation: ind.age,
+                objectives: ind.objectives!,
+                rank: 0,
+                crowdingDistance: 0,
+                dominationCount: 0,
+                dominatedSet: new Set()
+            }));
+            
+            const fronts = fastNonDominatedSort(rankedIndividuals);
+            
+            // Assign ranks and crowding distance
+            fronts.forEach((front: RankedIndividual[], rankIndex: number) => {
+                // Calculate crowding distance (modifies in-place)
+                calculateCrowdingDistance(front);
+                
+                // Assign rank and crowding distance to population
+                front.forEach((rankedInd: RankedIndividual) => {
+                    const ind = this.population.find(i => i.id === rankedInd.id);
+                    if (ind) {
+                        ind.paretoRank = rankIndex + 1; // Rank 1 = best front
+                        ind.crowdingDistance = rankedInd.crowdingDistance;
+                    }
+                });
+            });
+            
+            // 🎭 PHASE 3: Assign behavioral roles based on objectives
+            this.assignRoles();
+            
             console.log(`✅ Batch evaluation completed for ${this.population.length} individuals`);
+            console.log(`   🏆 Pareto Fronts: ${fronts.length}`);
+            console.log(`   🟢 Fixers: ${this.population.filter(i => i.role === 'fixer').length}`);
+            console.log(`   🔵 Explorers: ${this.population.filter(i => i.role === 'explorer').length}`);
+            console.log(`   🔴 Breakers: ${this.population.filter(i => i.role === 'breaker').length}`);
+            
+            // 🔬 DETAILED PARETO ANALYSIS
+            this.logParetoFrontsDetailed(fronts);
+            
         } catch (error) {
             console.error(`❌ Batch compilation failed:`, error);
             // Fallback: assegna fitness minimo a tutti
             for (const ind of this.population) {
                 ind.fitness = emergenceThreshold(this.config.populationSize);
+                ind.objectives = { loss: 1.0, diversity: 0, novelty: 0, coverage: 0 };
                 ind.age++;
             }
         }
     }
-
-    private calculateFitness(results: TestExecutionResult[], individual?: EvolutionIndividual): number {
-        if (results.length === 0) return 0;
+    
+    /**
+     * 🔬 Log detailed Pareto front analysis
+     * Shows all fronts with individual fitness components and crowding distances
+     */
+    private logParetoFrontsDetailed(fronts: RankedIndividual[][]) {
+        console.log(`\n=== 🔬 PARETO FRONT ANALYSIS ===`);
+        console.log(`Total Fronts: ${fronts.length} (Target: 3-5 for healthy diversity)\n`);
         
-        // 🚨 CRITICAL FIX: If ALL tests fail compilation, fitness MUST be near-zero
-        // Novelty should NOT compensate for non-compiling code
+        fronts.forEach((front, idx) => {
+            console.log(`📊 Front ${idx + 1} (${front.length} individuals):`);
+            
+            // Calculate average crowding distance
+            const avgCrowding = front.reduce((sum, ind) => sum + ind.crowdingDistance, 0) / front.length;
+            console.log(`   Avg Crowding Distance: ${avgCrowding.toFixed(3)} (Target: >0.5)\n`);
+            
+            // Show top 3 individuals from each front
+            const topIndividuals = front.slice(0, Math.min(3, front.length));
+            topIndividuals.forEach(ind => {
+                const role = this.population.find(p => p.id === ind.id)?.role || '?';
+                const roleEmoji = role === 'fixer' ? '🟢' : role === 'explorer' ? '🔵' : '🔴';
+                
+                console.log(`   ${roleEmoji} ${role.padEnd(8)} | loss=${ind.objectives.loss.toFixed(2)} ` +
+                           `div=${ind.objectives.diversity.toFixed(2)} ` +
+                           `nov=${ind.objectives.novelty.toFixed(2)} ` +
+                           `cov=${ind.objectives.coverage.toFixed(2)} ` +
+                           `| crowd=${ind.crowdingDistance.toFixed(2)}`);
+            });
+            
+            if (front.length > 3) {
+                console.log(`   ... and ${front.length - 3} more individuals`);
+            }
+            console.log('');
+        });
+        
+        // Calculate variance across all individuals
+        const allLosses = fronts.flat().map(ind => ind.objectives.loss);
+        const avgLoss = allLosses.reduce((a, b) => a + b, 0) / allLosses.length;
+        const variance = allLosses.reduce((sum, loss) => sum + Math.pow(loss - avgLoss, 2), 0) / allLosses.length;
+        
+        console.log(`📈 Population Metrics:`);
+        console.log(`   Variance (σ²): ${variance.toFixed(4)} (Target: >0.05)`);
+        console.log(`   Best Loss: ${Math.min(...allLosses).toFixed(2)}`);
+        console.log(`   Worst Loss: ${Math.max(...allLosses).toFixed(2)}`);
+        console.log(`===================================\n`);
+    }
+    
+    /**
+     * 🎭 ASSIGN BEHAVIORAL ROLES
+     * 
+     * Based on multi-objective performance with forced balancing:
+     * - FIXER: Low compilation loss (good at fixing syntax) - 30%
+     * - EXPLORER: High coverage (good at branching/assertions) - 40%
+     * - BREAKER: High chaos/novelty (good at edge cases/fuzzing) - 30%
+     * 
+     * Strategy: Sort by performance and assign roles to maintain balance
+     */
+    private assignRoles() {
+        const targetFixers = Math.floor(this.population.length * 0.3);
+        const targetExplorers = Math.floor(this.population.length * 0.4);
+        const targetBreakers = this.population.length - targetFixers - targetExplorers;
+        
+        // Create sorted lists by each metric
+        const byCompilation = [...this.population].sort((a, b) => {
+            const aScore = a.objectives ? (1 - a.objectives.loss) : 0;
+            const bScore = b.objectives ? (1 - b.objectives.loss) : 0;
+            return bScore - aScore; // Descending
+        });
+        
+        const byCoverage = [...this.population].sort((a, b) => {
+            const aScore = a.objectives?.coverage || 0;
+            const bScore = b.objectives?.coverage || 0;
+            return bScore - aScore;
+        });
+        
+        const byNovelty = [...this.population].sort((a, b) => {
+            const aScore = a.objectives?.novelty || 0;
+            const bScore = b.objectives?.novelty || 0;
+            return bScore - aScore;
+        });
+        
+        // Assign roles ensuring balanced distribution
+        const assigned = new Set<string>();
+        
+        // Top compilation performers → Fixers
+        for (let i = 0; i < targetFixers && i < byCompilation.length; i++) {
+            byCompilation[i].role = 'fixer';
+            assigned.add(byCompilation[i].id);
+        }
+        
+        // Top coverage performers (not already fixers) → Explorers
+        let explorerCount = 0;
+        for (const ind of byCoverage) {
+            if (!assigned.has(ind.id) && explorerCount < targetExplorers) {
+                ind.role = 'explorer';
+                assigned.add(ind.id);
+                explorerCount++;
+            }
+        }
+        
+        // Top novelty performers (not already assigned) → Breakers
+        let breakerCount = 0;
+        for (const ind of byNovelty) {
+            if (!assigned.has(ind.id) && breakerCount < targetBreakers) {
+                ind.role = 'breaker';
+                assigned.add(ind.id);
+                breakerCount++;
+            }
+        }
+        
+        // Fallback: assign any remaining individuals
+        for (const ind of this.population) {
+            if (!assigned.has(ind.id)) {
+                // Assign based on what's needed
+                const currentFixers = this.population.filter(i => i.role === 'fixer').length;
+                const currentExplorers = this.population.filter(i => i.role === 'explorer').length;
+                
+                if (currentFixers < targetFixers) {
+                    ind.role = 'fixer';
+                } else if (currentExplorers < targetExplorers) {
+                    ind.role = 'explorer';
+                } else {
+                    ind.role = 'breaker';
+                }
+            }
+        }
+    }
+
+    /**
+     * 🎯 MULTI-OBJECTIVE FITNESS CALCULATION
+     * 
+     * Instead of single fitness, calculate 4 objectives in parallel:
+     * 1. Compilation Score (semantic symbol-level)
+     * 2. Coverage Score (line + branch)
+     * 3. Chaos Score (edge cases + failures)
+     * 4. Novelty Score (diversity from population)
+     * 
+     * Then use Pareto ranking to avoid premature convergence!
+     */
+    private calculateMultiObjectiveFitness(
+        results: TestExecutionResult[], 
+        individual?: EvolutionIndividual
+    ): { objectives: Objectives; aggregatedFitness: number } {
+        if (results.length === 0) {
+            return {
+                objectives: { loss: 1.0, diversity: 0, novelty: 0, coverage: 0 },
+                aggregatedFitness: 0
+            };
+        }
+        
+        // � OBJECTIVE 1: COMPILATION (minimize loss)
         const compileErrors = results.filter(r => 
             r.error || (r.stderr && /SyntaxError|TypeError|ReferenceError|Parsing error|cannot find symbol|package .* does not exist/i.test(r.stderr || ''))
         ).length;
+        const compilationScore = 1 - (compileErrors / results.length);
         
-        const compilationRate = 1 - compileErrors / results.length; // 0 if all fail, 1 if all compile
+        // 🔵 OBJECTIVE 2: COVERAGE (maximize)
+        const passRate = results.filter(r => r.passed).length / results.length;
+        const coverageScore = passRate; // Simplified - could integrate real coverage data
         
-        // If NOTHING compiles, return minimal fitness (novelty-only mode)
-        if (compilationRate === 0) {
-            // Allow tiny fitness from novelty to preserve diverse errors for debugging
-            const novelty = individual ? this.calculateNoveltyScore(individual) : 0;
-            console.warn(`🚨 NON-COMPILING TEST: fitness=${(0.05 * novelty).toFixed(3)} (novelty=${novelty.toFixed(2)}, ${compileErrors}/${results.length} errors)`);
-            return 0.05 * novelty; // Max 5% fitness for non-compiling code
-        }
+        // 🔴 OBJECTIVE 3: CHAOS / EDGE CASES (maximize failure diversity)
+        const failureRate = 1 - passRate;
+        const securityAlerts = results.filter(r => r.securityAlert).length / results.length;
+        const chaosScore = Math.min(1, failureRate * 0.6 + securityAlerts * 0.4);
         
-        // Normal fitness calculation for compilable tests
-        const passRate = results.filter((r) => r.passed).length / results.length;
-        const perf = 1 - Math.min(1, results.map((r) => r.executionTime).reduce((a, b) => a + b, 0) / 10000);
-        const sec = results.filter((r) => r.securityAlert).length / results.length;
+        // 🟡 OBJECTIVE 4: NOVELTY (maximize diversity)
+        const noveltyScore = individual ? this.calculateNoveltyScore(individual) : 0.5;
         
-        // Use qualityMetric to derive weights: higher quality means more emphasis on pass rate
-        const entropy = passRate;
-        const variance = Math.abs(perf - passRate);
-        const complexity = sec + (1 - compilationRate);
-        const q = qualityMetric(entropy, variance, complexity);
+        // Calculate LOSS (minimize) - compilation is critical
+        const loss = (1 - compilationScore) * 0.5 +  // 50% weight on compilation
+                    (1 - coverageScore) * 0.2 +      // 20% weight on coverage
+                    (1 - chaosScore) * 0.15 +        // 15% weight on chaos
+                    (1 - noveltyScore) * 0.15;       // 15% weight on novelty
         
-        // Formal weights derived from quality metric
-        const w_pass = 0.3 + 0.2 * q;     // 0.3-0.5 based on quality
-        const w_perf = 0.2 + 0.1 * (1-q); // 0.2-0.3 inversely
-        const w_sec = 0.1 + 0.1 * q;      // 0.1-0.2 based on quality
-        const w_comp = 0.4 - 0.2 * q;     // 0.2-0.4 inversely (MUST compile!)
+        const objectives: Objectives = {
+            loss: Math.max(0, Math.min(1, loss)),
+            diversity: noveltyScore,
+            novelty: chaosScore, // Reuse chaos as novelty for edge cases
+            coverage: coverageScore
+        };
         
-        const baseFitness = Math.max(0, Math.min(1, 
-            w_pass * passRate + 
-            w_perf * perf + 
-            w_sec * sec + 
-            w_comp * compilationRate  // Changed from fComp to compilationRate
-        ));
+        // Aggregated fitness for simple comparison (1 - loss)
+        const aggregatedFitness = 1 - objectives.loss;
         
-        // 🧬 NOVELTY BONUS: Only significant if base fitness > 0.1
-        if (individual && baseFitness > 0.1) {
-            const novelty = this.calculateNoveltyScore(individual);
-            return 0.7 * baseFitness + 0.3 * novelty; // 70% fitness + 30% novelty
-        }
-        
-        return baseFitness;
+        return { objectives, aggregatedFitness };
     }
 
     /**
@@ -309,11 +646,54 @@ export class EvolutionEngine {
         return matrix[b.length][a.length];
     }
 
+    /**
+     * 🏅 Calculate archetype-specific bonus score
+     * Rewards individuals for excelling at their role
+     */
+    // @ts-ignore: Unused but kept for future role-based scoring
+    private calculateArchetypeBonus(
+        results: TestExecutionResult[], 
+        individual: EvolutionIndividual
+    ): number {
+        if (!individual.role) return 0;
+        
+        const role = individual.role;
+        
+        switch (role) {
+            case 'fixer':
+                // Reward error reduction compared to previous generation
+                const errorReduction = results.reduce((sum, r) => sum + (r.errorReduction || 0), 0);
+                const previousErrors = results.reduce((sum, r) => sum + (r.previousErrors || 1), 1);
+                return errorReduction / previousErrors;
+            
+            case 'explorer':
+                // Reward new branch coverage
+                const newBranches = results.reduce((sum, r) => sum + (r.newBranchesCovered || 0), 0);
+                const totalBranches = results.reduce((sum, r) => sum + (r.totalBranches || 1), 1);
+                return newBranches / totalBranches;
+            
+            case 'breaker':
+                // Reward discovery of unique exceptions
+                const uniqueExceptions = results.reduce((sum, r) => sum + (r.uniqueExceptionsFound || 0), 0);
+                const totalTests = results.reduce((sum, r) => sum + (r.totalTests || 1), 1);
+                return uniqueExceptions / totalTests;
+            
+            default:
+                return 0;
+        }
+    }
+
     private selectParents(): EvolutionIndividual[] {
         const parents: EvolutionIndividual[] = [];
+        const tournamentSize = 4;
+        
         while (parents.length < this.config.populationSize / 2) {
-            const t = [...this.population].sort(() => Math.random() - 0.5).slice(0, 4);
-            parents.push(t.reduce((a, b) => (b.fitness > a.fitness ? b : a)));
+            // Deterministic tournament selection
+            const seed = parents.length;
+            const shuffled = deterministicShuffle(this.population, seed);
+            const tournament = shuffled.slice(0, tournamentSize);
+            const winner = tournament.reduce((a, b) => (b.fitness > a.fitness ? b : a));
+            parents.push(winner);
         }
         return parents;
     }
@@ -331,24 +711,42 @@ export class EvolutionEngine {
                 .slice(0, this.config.elitismCount)
         );
 
+        let childCounter = 0;
         while (newPop.length < this.config.populationSize) {
-            const p1 = parents[Math.floor(Math.random() * parents.length)];
-            const p2 = parents[Math.floor(Math.random() * parents.length)];
+            // Deterministic parent selection
+            const seed1 = deterministicHash(`parent1_${childCounter}`, childCounter);
+            const seed2 = deterministicHash(`parent2_${childCounter}`, childCounter);
+            const p1 = parents[seed1 % parents.length];
+            const p2 = parents[seed2 % parents.length];
 
-            // 🧬 SEMANTIC CROSSOVER: Combine tests with different strategies
-            const child = Math.random() < 0.5
-                ? await this.semanticCrossover(p1, p2)
+            // Deterministic crossover decision
+            const crossoverSeed = deterministicHash(`crossover_${childCounter}`, childCounter);
+            const doCrossover = (crossoverSeed % 100) < (this.config.crossoverRate * 100);
+            
+            const child = doCrossover
+                ? await this.semanticCrossover(p1, p2, childCounter)
                 : structuredClone(p1);
 
-            if (Math.random() < this.config.mutationRate) {
+            // Deterministic mutation decision
+            const mutationSeed = deterministicHash(`mutation_${childCounter}`, childCounter);
+            const doMutate = (mutationSeed % 100) < (this.config.mutationRate * 100);
+            
+            if (doMutate) {
+                // 🎭 ROLE-BASED MUTATION: Use parent's role to guide mutation strategy
+                const parentRole = p1.role || 'explorer'; // Default to explorer if no role
+                
                 const ctx: MutationContext = {
                     domain: this.domain,
                     language: this.domain === "backend" ? "java" : "typescript",
+                    generation: childCounter,
                     copilotAdapter,
+                    role: parentRole // 🆕 Pass role to mutation engine
                 };
                 child.testSuite = await this.mutateTestSuite(child.testSuite, ctx);
+                child.role = parentRole; // Inherit parent's role
             }
 
+            childCounter++;
             newPop.push(child);
         }
 
@@ -356,67 +754,25 @@ export class EvolutionEngine {
     }
 
     /**
-     * 🧬 SEMANTIC CROSSOVER: Combine input values from different tests
-     * Creates hybrid edge cases by merging strategies
+     * 🧬 SEMANTIC CROSSOVER: Combine input values from different tests (deterministic)
      */
-    private async semanticCrossover(p1: EvolutionIndividual, p2: EvolutionIndividual): Promise<EvolutionIndividual> {
+    private async semanticCrossover(p1: EvolutionIndividual, p2: EvolutionIndividual, seed: number): Promise<EvolutionIndividual> {
         const t1 = p1.testSuite.tests[0];
         const t2 = p2.testSuite.tests[0];
         
         if (!t1 || !t2) return structuredClone(p1);
         
-        // 🤖 Extract input values using Copilot (semantic understanding)
-        const extractInputs = async (code: string): Promise<string[]> => {
-            if (!this.copilotAdapter) {
-                // Fallback: simple regex for literals
-                const matches = code.matchAll(/"([^"]+)"|'([^']+)'|null|\d+/g);
-                return Array.from(matches).map(m => m[0]);
-            }
-            
-            try {
-                const prompt = `Extract all input values from this test code. Return ONLY a JSON array of strings.
-
-Test code:
-\`\`\`
-${code}
-\`\`\`
-
-Return format: ["value1", "value2", ...]`;
-                
-                const response = await this.copilotAdapter.sendPrompt(prompt);
-                const jsonMatch = response.match(/\[[\s\S]*\]/);
-                if (jsonMatch) {
-                    return JSON.parse(jsonMatch[0]);
-                }
-                
-                // Fallback on parse error
-                const matches = code.matchAll(/"([^"]+)"|'([^']+)'|null|\d+/g);
-                return Array.from(matches).map(m => m[0]);
-            } catch {
-                // Fallback on any error
-                const matches = code.matchAll(/"([^"]+)"|'([^']+)'|null|\d+/g);
-                return Array.from(matches).map(m => m[0]);
-            }
-        };
-        
-        const inputs1 = await extractInputs(t1.code);
-        const inputs2 = await extractInputs(t2.code);
-        
-        // Hybrid strategy: mix inputs from both parents
-        let childCode = t1.code;
-        if (inputs1.length > 0 && inputs2.length > 0) {
-            // Replace first input from t1 with random input from t2
-            const randomInput2 = inputs2[Math.floor(Math.random() * inputs2.length)];
-            childCode = childCode.replace(inputs1[0], randomInput2);
-        }
+        // Simple hybrid: alternate characters deterministically
+        const input1 = t1.input || '';
+        const input2 = t2.input || '';
+        const hybridInput = input1.substring(0, input1.length / 2) + input2.substring(input2.length / 2);
         
         return {
-            id: `child_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            id: `child_${seed}`,
             testSuite: {
                 tests: [{
                     ...t1,
-                    code: childCode,
-                    input: `hybrid(${t1.input},${t2.input})`,
+                    input: hybridInput,
                     metadata: {
                         ...t1.metadata,
                         origin: 'mutated' as const,
@@ -435,14 +791,15 @@ Return format: ["value1", "value2", ...]`;
         suite: GeneratedTestSuite,
         ctx: MutationContext
     ): Promise<GeneratedTestSuite> {
-        // Use optimalAdaptationRate based on test suite dimension
         const dim = suite.tests.length;
         const mutationProb = optimalAdaptationRate(dim);
         
         const mutated = await Promise.all(
-            suite.tests.map(async (t) =>
-                Math.random() < mutationProb ? this.mutationRegistry.applyRandomMutation(t, ctx) : t
-            )
+            suite.tests.map(async (t, idx) => {
+                const seed = deterministicHash(`${t.name}_${ctx.generation}_${idx}`, ctx.generation);
+                const shouldMutate = (seed % 100) < (mutationProb * 100);
+                return shouldMutate ? this.mutationRegistry.applyRandomMutation(t, ctx) : t;
+            })
         );
         return { tests: mutated };
     }

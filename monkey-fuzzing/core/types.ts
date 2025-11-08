@@ -31,6 +31,15 @@ export interface GeneratedTest {
     origin: 'copilot-initial' | 'mutated' | 'repaired';
     generation?: number; // Evolution generation when produced
     confidence?: number; // Oracle prediction confidence
+    repairAttempts?: number; // 🆕 Number of repair attempts made
+    lastRepairReason?: string; // 🆕 Last repair explanation
+    
+    // 🧬 GENE MARKER SYSTEM - Individual test tracking in merged files
+    geneId?: string; // Unique identifier for this test (UUID)
+    geneHash?: string; // SHA-1 hash of method body (for change tracking)
+    role?: 'fixer' | 'explorer' | 'breaker'; // NSGA-II role classification
+    mutationType?: string; // Type of mutation applied (if mutated)
+    parentId?: string; // Parent test ID (for lineage tracking)
   };
 }
 

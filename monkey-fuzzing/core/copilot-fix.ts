@@ -2,113 +2,119 @@
  * =============================================================
  * COPILOT-FIX.TS
  * =============================================================
- * Motore di proposta patch (LLM / Copilot) per errori classificati.
- * - Riceve NormalizedError
- * - Genera suggerimenti di correzione test / input / mutation strategy
- * - Output strutturato per EvolutionEngine / MutationRegistry
+ * Copilot-based test repair engine
+ * - Reads compilation errors from Maven
+ * - Generates fixes via Copilot LLM
+ * - Applies fixes iteratively across generations
  * =============================================================
  */
 
-import type { NormalizedError } from './error-classifier';
-import { optimalLearningRate, shannonEntropy, bayesianConfidence } from '../metrics/metrics';
-import ts from 'typescript';
+// import type { NormalizedError } from './error-classifier'; // Unused
+import { CopilotAPI } from './types';
 
-export interface PatchProposal {
+export interface FixProposal {
   testName: string;
-  originalMessage: string;
-  patchType: 'syntax' | 'logic' | 'mutation-weight' | 'input-sanitization';
-  patchContent: string;
-  confidence: number; // [0,1]
-  derivedFrom: string[]; // error tokens / patterns
-}
-
-export interface CopilotAdapterLike {
-  generateMutation(prompt: string): Promise<string>;
+  originalError: string;
+  fixedCode: string;
+  confidence: number;
 }
 
 export class CopilotFixEngine {
-  constructor(private adapter?: CopilotAdapterLike) {}
+  constructor(private copilotAPI?: CopilotAPI) {}
 
-  /** Generate multiple candidate fixes for an error */
-  async generateFixes(err: NormalizedError, generation: number, maxCandidates: number = 3): Promise<PatchProposal[]> {
-    if (!this.adapter) return [];
-    const tokens = this.tokenize(err.raw).slice(0, 60);
-    const entropy = shannonEntropy(tokens.map(t => t.length));
-    const lrBase = optimalLearningRate(entropy, generation + 1);
-    const patchType: PatchProposal['patchType'] = err.kind === 'compile' ? 'syntax'
-      : err.kind === 'runtime' ? 'logic'
-      : err.kind === 'security' ? 'input-sanitization'
-      : 'mutation-weight';
-
-    const proposals: PatchProposal[] = [];
-    for (let i = 0; i < maxCandidates; i++) {
-      const focus = i === 0 ? 'minimal' : i === 1 ? 'robust' : 'edge_case';
-      const prompt = `You are an autonomous test repair engine.\nError kind: ${err.kind}\nMessage: ${err.message}\nSeverity: ${err.severity}\nEntropyTokens: ${entropy.toFixed(3)}\nMode: ${focus}\nProvide ONE ${focus} patch. If compile error: syntax fix. If runtime: logic adjust. If security: sanitize input. Return ONLY patch code or mutated input.`;
-      try {
-        const suggestion = await this.adapter.generateMutation(prompt);
-        // Use bayesianConfidence for formal confidence bounds
-        const [lower, upper] = bayesianConfidence([lrBase]);
-        const baseConf = (lower + upper) / 2;
-        const decayFactor = optimalLearningRate(i + 1, generation + 1);
-        const confidence = Math.min(1, baseConf + lrBase * (1 - decayFactor));
-        proposals.push({
-          testName: err.testName,
-          originalMessage: err.message,
-          patchType,
-          patchContent: suggestion.trim().slice(0, 2000),
-          confidence: Number(confidence.toFixed(3)),
-          derivedFrom: tokens.slice(0, 8)
-        });
-      } catch {
-        /* skip failed candidate */
-      }
+  /**
+   * 🎯 Main fix method: takes broken test code + errors, returns fixed code
+   */
+  async fixTest(testCode: string, errors: string[], generation: number): Promise<FixProposal> {
+    if (!this.copilotAPI) {
+      return {
+        testName: 'unknown',
+        originalError: errors.join('; '),
+        fixedCode: testCode, // No fix
+        confidence: 0
+      };
     }
-    return proposals;
-  }
 
-  /** Single best fix (compat API) */
-  async proposeFix(err: NormalizedError, generation: number): Promise<PatchProposal | undefined> {
-    const fixes = await this.generateFixes(err, generation, 1);
-    return fixes[0];
-  }
+    const prompt = `Fix this Java JUnit test class. It has compilation errors.
 
-  selectBestFix(fixes: PatchProposal[]): PatchProposal | undefined {
-    if (!fixes.length) return undefined;
-    // naive selection: highest confidence, tie-break by shortest patch (minimal change principle)
-    return fixes.slice().sort((a,b)=> b.confidence - a.confidence || a.patchContent.length - b.patchContent.length)[0];
-  }
+**ERRORS**:
+${errors.slice(0, 5).join('\n')}
 
-  /** Apply patch to a test object (simple heuristic: if syntax/logic replace code, if input-sanitization mutate input) */
-  applyFix(test: any, fix: PatchProposal): any {
-    if (!fix) return test;
-    if (fix.patchType === 'input-sanitization') {
-      return { ...test, input: fix.patchContent };
-    }
-    if (fix.patchType === 'mutation-weight') {
-      // Could adjust mutation metadata weights; placeholder attaches hint
-      return { ...test, metadata: { ...(test.metadata||{}), mutationHint: fix.patchContent } };
-    }
-    // syntax or logic -> treat as code replacement if feasible
-    if (typeof test.code === 'string') {
-      if (this.isValidTypeScript(fix.patchContent)) {
-        return { ...test, code: fix.patchContent };
-      } else {
-        return { ...test, metadata: { ...(test.metadata||{}), skippedInvalidPatch: true } };
-      }
-    }
-    return { ...test, metadata: { ...(test.metadata||{}), fixPatch: fix.patchContent } };
-  }
+**BROKEN CODE**:
+\`\`\`java
+${testCode}
+\`\`\`
 
-  private tokenize(raw: string): string[] {
-    return raw.split(/[^A-Za-z0-9_]+/).filter(Boolean);
-  }
+**INSTRUCTIONS**:
+1. Fix all compilation errors
+2. Keep test logic intact
+3. Return ONLY fixed Java code (no markdown, no explanations)
 
-  private isValidTypeScript(code: string): boolean {
+Fixed code:`;
+
     try {
-      const transpiled = ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.ESNext } });
-      return transpiled.outputText.length > 0;
-    } catch {
-      return false;
+      const response = await this.copilotAPI.generate(prompt);
+      
+      // 🤖 Ask Copilot to extract code if wrapped in markdown
+      let fixedCode = response.trim();
+      if (fixedCode.includes('```')) {
+        const extractPrompt = `Extract ONLY the Java code from this response (remove markdown):
+
+${response}
+
+Return ONLY Java code:`;
+        fixedCode = (await this.copilotAPI.generate(extractPrompt)).trim();
+      }
+      
+      // Extract test class name via Copilot
+      const namePrompt = `What is the class name in this Java code? Return ONLY the class name:
+
+${testCode.substring(0, 200)}`;
+      
+      const testName = (await this.copilotAPI.generate(namePrompt)).trim();
+      
+      return {
+        testName,
+        originalError: errors[0] || 'unknown',
+        fixedCode,
+        confidence: 0.8 - (generation * 0.05)
+      };
+    } catch (err) {
+      console.error('❌ Copilot fix failed:', (err as Error).message);
+      return {
+        testName: 'unknown',
+        originalError: errors.join('; '),
+        fixedCode: testCode,
+        confidence: 0
+      };
     }
+  }
+
+  /**
+   * Batch fix multiple tests
+   */
+  async fixTests(tests: Array<{ code: string; name: string }>, errors: string[], generation: number): Promise<Array<{ name: string; code: string }>> {
+    const fixed: Array<{ name: string; code: string }> = [];
+    
+    for (const test of tests) {
+      const relevantErrors = errors.filter(e => e.includes(test.name));
+      if (relevantErrors.length === 0) {
+        fixed.push(test); // No errors, keep as-is
+        continue;
+      }
+      
+      console.log(`🔧 Fixing ${test.name}...`);
+      const proposal = await this.fixTest(test.code, relevantErrors, generation);
+      
+      if (proposal.confidence > 0.5) {
+        fixed.push({ name: test.name, code: proposal.fixedCode });
+        console.log(`✅ Fixed ${test.name} (confidence: ${proposal.confidence.toFixed(2)})`);
+      } else {
+        fixed.push(test); // Keep original if fix confidence too low
+        console.log(`⚠️ Low confidence fix for ${test.name}, keeping original`);
+      }
+    }
+    
+    return fixed;
   }
 }

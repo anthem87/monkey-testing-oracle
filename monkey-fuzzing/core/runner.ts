@@ -107,14 +107,6 @@ export class TestRunner {
                 console.log(`⚠️ Compilation failed with ${compileResult.errors.length} errors`);
                 compileResult.errors.slice(0, 3).forEach(e => console.log(`  - ${e.substring(0, 120)}`));
                 
-                // 🔍 Check for missing dependencies using Copilot
-                const { analyzeMissingDependencies, formatDependencyWarning } = await import('./dependency-checker.js');
-                const missing = await analyzeMissingDependencies(compileResult.errors, this.copilotAdapter);
-                
-                if (missing.length > 0) {
-                    console.error(formatDependencyWarning(missing));
-                }
-                
                 // Classify compilation errors for feedback loop
                 for (const error of compileResult.errors) {
                     const classified = this.errorClassifier.classify('compilation-error', error);

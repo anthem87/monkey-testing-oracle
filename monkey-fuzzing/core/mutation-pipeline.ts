@@ -17,10 +17,17 @@ export class MutationPipeline {
   constructor(private copilotFixEngine: CopilotFixEngine) {}
 
   async applyIntelligentFixes(test: GeneratedTest, error: NormalizedError, generation: number): Promise<GeneratedTest> {
-    const fixes = await this.copilotFixEngine.generateFixes(error, generation, 3);
-    const best = this.copilotFixEngine.selectBestFix(fixes);
-    if (!best) return test;
-    return this.copilotFixEngine.applyFix(test, best);
+    // Use new CopilotFixEngine.fixTest() method
+    const fixProposal = await this.copilotFixEngine.fixTest(test.code, [error.message], generation);
+    
+    if (fixProposal.confidence > 0.5) {
+      return {
+        ...test,
+        code: fixProposal.fixedCode,
+        name: fixProposal.testName
+      };
+    }
+    return test; // Return unchanged if confidence too low
   }
 
   async processErrors(tests: GeneratedTest[], errors: NormalizedError[], generation: number): Promise<GeneratedTest[]> {
